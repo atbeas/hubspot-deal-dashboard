@@ -51,7 +51,7 @@ def logout():
 @app.route("/")
 @login_required
 def index():
-    # Fetch rs_partner enum options to pass into the template
+    # Fetch rs_partner enum options
     client_options = []
     resp = requests.get(
         f"{BASE_URL}/crm/v3/properties/deals/rs_partner",
@@ -64,7 +64,15 @@ def index():
             for o in data.get("options", [])
             if not o.get("hidden")
         ]
-    return render_template("index.html", client_options=client_options)
+
+    # Fetch deal pipelines
+    pipeline_options = []
+    resp = requests.get(f"{BASE_URL}/crm/v3/pipelines/deals", headers=HEADERS)
+    if resp.ok:
+        for p in resp.json().get("results", []):
+            pipeline_options.append({"label": p["label"], "value": p["id"]})
+
+    return render_template("index.html", client_options=client_options, pipeline_options=pipeline_options)
 
 
 @app.route("/api/owners")
@@ -99,8 +107,9 @@ def get_owners():
 @app.route("/api/deals")
 @login_required
 def get_deals():
-    start = request.args.get("start")
-    end   = request.args.get("end")
+    start    = request.args.get("start")
+    end      = request.args.get("end")
+    pipeline = request.args.get("pipeline", "")
     if not start or not end:
         return jsonify({"error": "start and end required"}), 400
 
@@ -108,17 +117,19 @@ def get_deals():
     end_ms   = int(datetime.fromisoformat(end).timestamp() * 1000) + 86399999
 
     properties = [
-        "dealname", "createdate", "dealstage", "amount", "hubspot_owner_id",
+        "dealname", "createdate", "dealstage", "pipeline", "amount", "hubspot_owner_id",
         "business_needs",
     ] + list(ROLE_PROPS.values())
 
+    filters = [
+        {"propertyName": "createdate", "operator": "GTE", "value": str(start_ms)},
+        {"propertyName": "createdate", "operator": "LTE", "value": str(end_ms)},
+    ]
+    if pipeline:
+        filters.append({"propertyName": "pipeline", "operator": "EQ", "value": pipeline})
+
     payload = {
-        "filterGroups": [{
-            "filters": [
-                {"propertyName": "createdate", "operator": "GTE", "value": str(start_ms)},
-                {"propertyName": "createdate", "operator": "LTE", "value": str(end_ms)},
-            ]
-        }],
+        "filterGroups": [{"filters": filters}],
         "properties": properties,
         "sorts": [{"propertyName": "createdate", "direction": "DESCENDING"}],
         "limit": 200,
