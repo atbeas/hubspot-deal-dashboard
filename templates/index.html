@@ -141,6 +141,33 @@
     .btn-submit:disabled { opacity: .5; cursor: not-allowed; background: #ff5c35; }
     .btn-submit.saved { background: #059669; }
 
+    /* ── Meeting invite section ── */
+    .card-meeting {
+      padding: 12px 20px 16px;
+      border-top: 1px solid #f0f0f0;
+      display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+    }
+    .meeting-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 220px; }
+    .meeting-label {
+      font-size: .73rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: #6b7280;
+    }
+    select.meeting-select {
+      border: 1px solid #d1d5db; border-radius: 7px; padding: 8px 10px;
+      font-size: .86rem; font-family: inherit; color: #1a1a2e;
+      background: #fff; outline: none; cursor: pointer; width: 100%;
+      transition: border-color .2s;
+    }
+    select.meeting-select:focus { border-color: #ff5c35; }
+    .btn-invite {
+      padding: 9px 20px; border-radius: 7px; font-size: .88rem; font-weight: 600;
+      cursor: pointer; border: none; background: #2563eb; color: #fff;
+      white-space: nowrap; transition: background .15s, opacity .15s;
+    }
+    .btn-invite:hover  { background: #1d4ed8; }
+    .btn-invite:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-invite.invited { background: #059669; }
+
     /* ── Empty / loading ── */
     .state-box {
       background: #fff; border: 1px solid #e2e4e9; border-radius: 10px;
@@ -224,8 +251,9 @@
 <div id="toast"></div>
 
 <script>
-  let allOwners = [];
-  let allDeals  = [];
+  let allOwners   = [];
+  let allDeals    = [];
+  let allMeetings = [];
 
   // Client options come from the server (rs_partner enum)
   const CLIENT_OPTIONS = {{ client_options | tojson }};
@@ -252,6 +280,55 @@
       allOwners = d.owners || [];
     } catch(e) {
       console.warn('Could not load owners:', e);
+    }
+  }
+
+  async function loadMeetings() {
+    try {
+      const r = await fetch('/api/meetings');
+      const d = await r.json();
+      allMeetings = d.meetings || [];
+    } catch(e) {
+      console.warn('Could not load meetings:', e);
+    }
+  }
+
+  async function addToInvite(dealId) {
+    const eventId = document.getElementById(`meeting-${dealId}`).value;
+    if (!eventId) return showToast('Select a meeting first', true);
+
+    const card = document.getElementById(`card-${dealId}`);
+    const selects = card.querySelectorAll('select.role-select');
+    const roles = {};
+    selects.forEach(s => { roles[s.dataset.role] = s.value; });
+
+    // Collect emails for SD, AM, SE from the owners list
+    const emails = ['sd', 'am', 'se']
+      .map(role => allOwners.find(o => o.id === roles[role])?.email)
+      .filter(Boolean);
+
+    if (!emails.length) return showToast('Assign at least SD, AM, or SE first', true);
+
+    const btn = document.getElementById(`invite-${dealId}`);
+    btn.disabled = true;
+    btn.textContent = 'Adding…';
+
+    try {
+      const resp = await fetch(`/api/meetings/${encodeURIComponent(eventId)}/add-attendees`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ emails }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Failed');
+      btn.textContent = '✓ Added';
+      btn.classList.add('invited');
+      btn.disabled = false;
+      showToast(`${data.added} team member${data.added !== 1 ? 's' : ''} added to invite`);
+    } catch(e) {
+      btn.textContent = 'Add to Invite';
+      btn.disabled = false;
+      showToast('Failed — ' + e.message, true);
     }
   }
 
@@ -283,7 +360,8 @@
     try {
       const [dealsResp] = await Promise.all([
         fetch(`/api/deals?${params}`),
-        allOwners.length ? Promise.resolve() : loadOwners(),
+        allOwners.length   ? Promise.resolve() : loadOwners(),
+        allMeetings.length ? Promise.resolve() : loadMeetings(),
       ]);
       const data = await dealsResp.json();
       if (!dealsResp.ok) throw new Error(data.error || 'Failed to load deals');
@@ -363,6 +441,18 @@
             ${allFilled ? '✓ Saved' : 'Submit'}
           </button>
         </div>
+      </div>
+      <div class="card-meeting">
+        <div class="meeting-group">
+          <span class="meeting-label">Add Team to Calendar Invite</span>
+          <select class="meeting-select" id="meeting-${d.id}">
+            <option value="">— Select meeting —</option>
+            ${allMeetings.map(m => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn-invite" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
+          Add to Invite
+        </button>
       </div>
       <div class="card-needs">
         <div class="needs-label">SD Need Discovery <span>· business_needs</span></div>
@@ -472,8 +562,9 @@
     el.addEventListener('keydown', e => e.key === 'Enter' && loadDeals())
   );
 
-  // Pre-load owners in background
+  // Pre-load owners and meetings in background
   loadOwners();
+  loadMeetings();
 </script>
 </body>
 </html>

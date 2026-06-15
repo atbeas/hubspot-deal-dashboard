@@ -3,7 +3,24 @@ import secrets
 import requests
 from functools import wraps
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+MS_TENANT_ID     = os.environ.get("MS_TENANT_ID", "")
+MS_CLIENT_ID     = os.environ.get("MS_CLIENT_ID", "")
+MS_CLIENT_SECRET = os.environ.get("MS_CLIENT_SECRET", "")
+SCHEDULING_EMAIL = "scheduling@10talent.tech"
+
+def get_ms_token():
+    resp = requests.post(
+        f"https://login.microsoftonline.com/{MS_TENANT_ID}/oauth2/v2.0/token",
+        data={
+            "grant_type":    "client_credentials",
+            "client_id":     MS_CLIENT_ID,
+            "client_secret": MS_CLIENT_SECRET,
+            "scope":         "https://graph.microsoft.com/.default",
+        },
+    )
+    return resp.json().get("access_token", "")
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
@@ -216,6 +233,83 @@ def update_deal(deal_id):
         return jsonify({"error": resp.text}), resp.status_code
 
     return jsonify({"ok": True})
+
+
+@app.route("/api/meetings")
+@login_required
+def get_meetings():
+    token = get_ms_token()
+    if not token:
+        return jsonify({"error": "Could not get Microsoft token"}), 500
+
+    ms_headers = {"Authorization": f"Bearer {token}"}
+    now   = datetime.now(timezone.utc)
+    start = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end   = (now + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    resp = requests.get(
+        f"https://graph.microsoft.com/v1.0/users/{SCHEDULING_EMAIL}/calendarView",
+        headers=ms_headers,
+        params={
+            "startDateTime": start,
+            "endDateTime":   end,
+            "$select":       "id,subject,start,end,attendees",
+            "$orderby":      "start/dateTime",
+            "$top":          100,
+        },
+    )
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    meetings = []
+    for e in resp.json().get("value", []):
+        try:
+            dt = datetime.fromisoformat(e["start"]["dateTime"].replace("Z", "+00:00"))
+            label = f"{e['subject']} — {dt.strftime('%b %d, %Y %-I:%M %p')}"
+        except Exception:
+            label = e.get("subject", "(No subject)")
+        meetings.append({"id": e["id"], "label": label})
+
+    return jsonify({"meetings": meetings})
+
+
+@app.route("/api/meetings/<path:event_id>/add-attendees", methods=["POST"])
+@login_required
+def add_meeting_attendees(event_id):
+    body   = request.get_json()
+    emails = [e for e in body.get("emails", []) if e]
+    if not emails:
+        return jsonify({"error": "No emails provided"}), 400
+
+    token = get_ms_token()
+    ms_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # Fetch current attendees so we don't wipe them
+    resp = requests.get(
+        f"https://graph.microsoft.com/v1.0/users/{SCHEDULING_EMAIL}/events/{event_id}",
+        headers=ms_headers,
+        params={"$select": "attendees"},
+    )
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    current = resp.json().get("attendees", [])
+    existing = {a["emailAddress"]["address"].lower() for a in current}
+
+    for email in emails:
+        if email.lower() not in existing:
+            current.append({"emailAddress": {"address": email}, "type": "required"})
+            existing.add(email.lower())
+
+    patch = requests.patch(
+        f"https://graph.microsoft.com/v1.0/users/{SCHEDULING_EMAIL}/events/{event_id}",
+        headers=ms_headers,
+        json={"attendees": current},
+    )
+    if not patch.ok:
+        return jsonify({"error": patch.text}), patch.status_code
+
+    return jsonify({"ok": True, "added": len(emails)})
 
 
 if __name__ == "__main__":
