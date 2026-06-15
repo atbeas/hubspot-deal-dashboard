@@ -1,9 +1,31 @@
 import os
+import sqlite3
 import secrets
 import requests
 from functools import wraps
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from datetime import datetime, timezone, timedelta
+
+DB_PATH = os.path.join(os.environ.get("DATA_DIR", os.path.dirname(__file__)), "client_contacts.db")
+
+def get_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS client_contacts (
+                client_value TEXT PRIMARY KEY,
+                email1 TEXT DEFAULT '',
+                email2 TEXT DEFAULT '',
+                email3 TEXT DEFAULT ''
+            )
+        """)
+
+init_db()
 
 MS_TENANT_ID     = os.environ.get("MS_TENANT_ID", "")
 MS_CLIENT_ID     = os.environ.get("MS_CLIENT_ID", "")
@@ -301,6 +323,62 @@ def add_meeting_attendees(event_id):
         return jsonify({"error": patch.text}), patch.status_code
 
     return jsonify({"ok": True, "added": len(emails)})
+
+
+@app.route("/settings")
+@login_required
+def settings():
+    # Fetch rs_partner options from HubSpot
+    client_options = []
+    resp = requests.get(f"{BASE_URL}/crm/v3/properties/deals/rs_partner", headers=HEADERS)
+    if resp.ok:
+        client_options = [
+            {"label": o["label"], "value": o["value"]}
+            for o in resp.json().get("options", [])
+            if not o.get("hidden")
+        ]
+    client_options.sort(key=lambda x: x["label"].lower())
+
+    # Load saved contacts from DB
+    with get_db() as conn:
+        rows = {r["client_value"]: dict(r) for r in conn.execute("SELECT * FROM client_contacts")}
+
+    for c in client_options:
+        saved = rows.get(c["value"], {})
+        c["email1"] = saved.get("email1", "")
+        c["email2"] = saved.get("email2", "")
+        c["email3"] = saved.get("email3", "")
+
+    return render_template("settings.html", client_options=client_options)
+
+
+@app.route("/api/clients/<client_value>", methods=["POST"])
+@login_required
+def save_client(client_value):
+    body = request.get_json()
+    emails = [body.get(f"email{i}", "").strip() for i in range(1, 4)]
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO client_contacts (client_value, email1, email2, email3)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(client_value) DO UPDATE SET
+                email1 = excluded.email1,
+                email2 = excluded.email2,
+                email3 = excluded.email3
+        """, [client_value] + emails)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/clients/<client_value>", methods=["GET"])
+@login_required
+def get_client(client_value):
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM client_contacts WHERE client_value = ?", [client_value]
+        ).fetchone()
+    if row:
+        return jsonify({"emails": [row["email1"], row["email2"], row["email3"]]})
+    return jsonify({"emails": ["", "", ""]})
 
 
 if __name__ == "__main__":

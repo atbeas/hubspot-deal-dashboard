@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Client Settings — Deal Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #f4f5f7; color: #1a1a2e; min-height: 100vh; }
+
+    header {
+      background: #ff5c35; color: #fff;
+      padding: 16px 32px; display: flex; align-items: center; gap: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; }
+    header p  { font-size: .82rem; opacity: .85; margin-top: 1px; }
+    .header-nav { margin-left: auto; display: flex; gap: 10px; }
+    .nav-link {
+      padding: 7px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600;
+      text-decoration: none; color: #fff; background: rgba(255,255,255,.2);
+      transition: background .15s;
+    }
+    .nav-link:hover { background: rgba(255,255,255,.3); }
+
+    .page-wrap { max-width: 860px; margin: 32px auto; padding: 0 24px 60px; }
+
+    .page-header { margin-bottom: 24px; }
+    .page-header h2 { font-size: 1.1rem; font-weight: 700; color: #1a1a2e; }
+    .page-header p  { font-size: .85rem; color: #6b7280; margin-top: 4px; }
+
+    .search-bar {
+      margin-bottom: 18px;
+    }
+    .search-bar input {
+      width: 100%; padding: 9px 14px; border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: .9rem; font-family: inherit; outline: none;
+    }
+    .search-bar input:focus { border-color: #ff5c35; }
+
+    .client-table {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 12px; overflow: hidden;
+    }
+    .client-row {
+      display: grid;
+      grid-template-columns: 220px 1fr 1fr 1fr 90px;
+      gap: 12px; align-items: center;
+      padding: 12px 20px; border-bottom: 1px solid #f0f0f0;
+    }
+    .client-row:last-child { border-bottom: none; }
+    .client-row.header-row {
+      background: #f9fafb; padding: 10px 20px;
+      font-size: .72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: #6b7280;
+    }
+    .client-name { font-size: .88rem; font-weight: 600; color: #1a1a2e; }
+    .client-row.hidden { display: none; }
+
+    input.email-input {
+      width: 100%; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px;
+      font-size: .84rem; font-family: inherit; color: #1a1a2e; outline: none;
+      transition: border-color .2s;
+    }
+    input.email-input:focus { border-color: #ff5c35; }
+    input.email-input.dirty { border-color: #fcd34d; background: #fffbeb; }
+    input.email-input.saved { border-color: #6ee7b7; background: #f0fdf4; }
+
+    .btn-save {
+      padding: 7px 14px; border-radius: 6px; font-size: .82rem; font-weight: 600;
+      cursor: pointer; border: none; background: #ff5c35; color: #fff;
+      transition: background .15s, opacity .15s; white-space: nowrap;
+    }
+    .btn-save:hover { background: #e04d2a; }
+    .btn-save:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-save.saved { background: #059669; }
+
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: #1a1a2e; color: #fff; padding: 11px 18px;
+      border-radius: 8px; font-size: .86rem; font-weight: 500;
+      opacity: 0; transform: translateY(8px);
+      transition: opacity .2s, transform .2s; pointer-events: none; z-index: 999;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.error { background: #dc2626; }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="rgba(255,255,255,.2)"/>
+    <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>Client Settings</h1>
+    <p>Manage contact emails for each client partner</p>
+  </div>
+  <div class="header-nav">
+    <a href="/" class="nav-link">← Dashboard</a>
+    <a href="/logout" class="nav-link">Log Out</a>
+  </div>
+</header>
+
+<div class="page-wrap">
+  <div class="page-header">
+    <h2>Client Contact Emails</h2>
+    <p>Add up to 3 email addresses per client. These will be pre-filled in the "Add to Invite" confirmation when that client is assigned to a deal.</p>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" placeholder="Search clients…" oninput="filterClients(this.value)" />
+  </div>
+
+  <div class="client-table">
+    <div class="client-row header-row">
+      <div>Client</div>
+      <div>Contact Email 1</div>
+      <div>Contact Email 2</div>
+      <div>Contact Email 3</div>
+      <div></div>
+    </div>
+    {% for c in client_options %}
+    <div class="client-row" data-label="{{ c.label | lower }}" id="row-{{ c.value }}">
+      <div class="client-name">{{ c.label }}</div>
+      <input class="email-input" type="email" placeholder="email@example.com"
+             value="{{ c.email1 }}" oninput="markDirty(this, '{{ c.value }}')" />
+      <input class="email-input" type="email" placeholder="email@example.com"
+             value="{{ c.email2 }}" oninput="markDirty(this, '{{ c.value }}')" />
+      <input class="email-input" type="email" placeholder="email@example.com"
+             value="{{ c.email3 }}" oninput="markDirty(this, '{{ c.value }}')" />
+      <button class="btn-save" id="savebtn-{{ c.value }}"
+              onclick="saveClient('{{ c.value }}', this)">Save</button>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  function filterClients(query) {
+    const q = query.toLowerCase();
+    document.querySelectorAll('.client-row:not(.header-row)').forEach(row => {
+      row.classList.toggle('hidden', !row.dataset.label.includes(q));
+    });
+  }
+
+  function markDirty(input, clientValue) {
+    input.classList.add('dirty');
+    input.classList.remove('saved');
+    const btn = document.getElementById(`savebtn-${clientValue}`);
+    btn.textContent = 'Save';
+    btn.classList.remove('saved');
+  }
+
+  async function saveClient(clientValue, btn) {
+    const row = document.getElementById(`row-${clientValue}`);
+    const inputs = row.querySelectorAll('input.email-input');
+    const payload = {};
+    inputs.forEach((inp, i) => { payload[`email${i + 1}`] = inp.value.trim(); });
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      const resp = await fetch(`/api/clients/${encodeURIComponent(clientValue)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      inputs.forEach(inp => { inp.classList.remove('dirty'); inp.classList.add('saved'); });
+      btn.textContent = '✓ Saved';
+      btn.classList.add('saved');
+      btn.disabled = false;
+      showToast(`${row.querySelector('.client-name').textContent} saved`);
+    } catch(e) {
+      btn.textContent = 'Save';
+      btn.disabled = false;
+      showToast('Failed to save', true);
+    }
+  }
+
+  let toastTimer;
+  function showToast(msg, isError = false) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'show' + (isError ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.className = '', 3000);
+  }
+</script>
+</body>
+</html>

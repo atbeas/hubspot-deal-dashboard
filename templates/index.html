@@ -17,6 +17,13 @@
     }
     header h1 { font-size: 1.2rem; font-weight: 700; }
     header p  { font-size: .82rem; opacity: .85; margin-top: 1px; }
+    .header-nav { margin-left: auto; display: flex; gap: 10px; }
+    .nav-link {
+      padding: 7px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600;
+      text-decoration: none; color: #fff; background: rgba(255,255,255,.2);
+      transition: background .15s;
+    }
+    .nav-link:hover { background: rgba(255,255,255,.3); }
 
     /* ── Filter bar ── */
     .filters {
@@ -247,6 +254,10 @@
     <h1>Deal Assignment Dashboard</h1>
     <p>Assign Client, Sales Development, Account Manager, and Sales Executive to new deals</p>
   </div>
+  <div class="header-nav">
+    <a href="/settings" class="nav-link">⚙ Settings</a>
+    <a href="/logout" class="nav-link">Log Out</a>
+  </div>
 </header>
 
 <div class="filters">
@@ -272,6 +283,27 @@
 </div>
 
 <div id="toast"></div>
+
+<!-- Invite confirmation modal -->
+<div id="inviteModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:200; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:14px; padding:28px 32px; max-width:480px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,.2);">
+    <h2 style="font-size:1rem; font-weight:700; margin-bottom:6px;">Confirm Attendees</h2>
+    <p style="font-size:.83rem; color:#6b7280; margin-bottom:18px;">These people will be added to the selected calendar invite. Remove anyone or add extras before confirming.</p>
+    <div id="modalAttendees" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;"></div>
+    <div style="display:flex; gap:8px; margin-bottom:18px;">
+      <input id="modalExtraEmail" type="email" placeholder="Add another email…"
+             style="flex:1; padding:7px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:.86rem; font-family:inherit; outline:none;" />
+      <button onclick="modalAddExtra()"
+              style="padding:7px 14px; border-radius:6px; border:none; background:#f3f4f6; color:#374151; font-size:.86rem; font-weight:600; cursor:pointer;">Add</button>
+    </div>
+    <div style="display:flex; gap:10px; justify-content:flex-end;">
+      <button onclick="closeModal()"
+              style="padding:9px 20px; border-radius:7px; border:none; background:#f3f4f6; color:#374151; font-size:.88rem; font-weight:600; cursor:pointer;">Cancel</button>
+      <button id="modalConfirmBtn" onclick="confirmInvite()"
+              style="padding:9px 20px; border-radius:7px; border:none; background:#2563eb; color:#fff; font-size:.88rem; font-weight:600; cursor:pointer;">Confirm & Add to Invite</button>
+    </div>
+  </div>
+</div>
 
 <script>
   let allOwners   = [];
@@ -369,25 +401,80 @@
     });
   });
 
+  let _pendingInvite = null; // { dealId, eventId, btn }
+
   async function addToInvite(dealId) {
     const eventId = document.getElementById(`meeting-${dealId}`).value;
     if (!eventId) return showToast('Select a meeting first', true);
 
-    const card = document.getElementById(`card-${dealId}`);
+    const card   = document.getElementById(`card-${dealId}`);
     const selects = card.querySelectorAll('select.role-select');
-    const roles = {};
+    const roles  = {};
     selects.forEach(s => { roles[s.dataset.role] = s.value; });
 
-    // Collect emails for SD, AM, SE from the owners list
-    const emails = ['sd', 'am', 'se']
+    // Team emails from owners
+    const teamEmails = ['sd', 'am', 'se']
       .map(role => allOwners.find(o => o.id === roles[role])?.email)
       .filter(Boolean);
 
-    if (!emails.length) return showToast('Assign at least SD, AM, or SE first', true);
+    // Client emails from settings DB
+    const clientValue = roles['client'] || '';
+    let clientEmails = [];
+    if (clientValue) {
+      try {
+        const r = await fetch(`/api/clients/${encodeURIComponent(clientValue)}`);
+        const d = await r.json();
+        clientEmails = (d.emails || []).filter(Boolean);
+      } catch(e) { /* ignore */ }
+    }
 
-    const btn = document.getElementById(`invite-${dealId}`);
-    btn.disabled = true;
-    btn.textContent = 'Adding…';
+    const allEmails = [...new Set([...teamEmails, ...clientEmails])];
+    if (!allEmails.length) return showToast('Assign at least SD, AM, or SE first', true);
+
+    _pendingInvite = { dealId, eventId, btn: document.getElementById(`invite-${dealId}`) };
+    openModal(allEmails);
+  }
+
+  function openModal(emails) {
+    const container = document.getElementById('modalAttendees');
+    container.innerHTML = '';
+    emails.forEach(email => addChip(container, email));
+    document.getElementById('modalExtraEmail').value = '';
+    document.getElementById('inviteModal').style.display = 'flex';
+  }
+
+  function addChip(container, email) {
+    const chip = document.createElement('div');
+    chip.style.cssText = 'display:flex;align-items:center;gap:5px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:20px;padding:4px 10px;font-size:.82rem;color:#1d4ed8;';
+    chip.dataset.email = email;
+    chip.innerHTML = `<span>${esc(email)}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:#93c5fd;font-size:1rem;line-height:1;padding:0;">×</button>`;
+    container.appendChild(chip);
+  }
+
+  function modalAddExtra() {
+    const input = document.getElementById('modalExtraEmail');
+    const email = input.value.trim();
+    if (!email) return;
+    const container = document.getElementById('modalAttendees');
+    const exists = Array.from(container.querySelectorAll('[data-email]')).some(c => c.dataset.email === email);
+    if (!exists) addChip(container, email);
+    input.value = '';
+  }
+
+  function closeModal() {
+    document.getElementById('inviteModal').style.display = 'none';
+    _pendingInvite = null;
+  }
+
+  async function confirmInvite() {
+    if (!_pendingInvite) return;
+    const { dealId, eventId, btn } = _pendingInvite;
+    const emails = Array.from(document.getElementById('modalAttendees').querySelectorAll('[data-email]'))
+      .map(c => c.dataset.email);
+    if (!emails.length) return showToast('No attendees selected', true);
+
+    document.getElementById('modalConfirmBtn').disabled = true;
+    document.getElementById('modalConfirmBtn').textContent = 'Adding…';
 
     try {
       const resp = await fetch(`/api/meetings/${encodeURIComponent(eventId)}/add-attendees`, {
@@ -397,16 +484,22 @@
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Failed');
+      closeModal();
       btn.textContent = '✓ Added';
       btn.classList.add('invited');
-      btn.disabled = false;
-      showToast(`${data.added} team member${data.added !== 1 ? 's' : ''} added to invite`);
+      showToast(`${data.added} attendee${data.added !== 1 ? 's' : ''} added to invite`);
     } catch(e) {
-      btn.textContent = 'Add to Invite';
-      btn.disabled = false;
       showToast('Failed — ' + e.message, true);
+    } finally {
+      document.getElementById('modalConfirmBtn').disabled = false;
+      document.getElementById('modalConfirmBtn').textContent = 'Confirm & Add to Invite';
     }
   }
+
+  // Close modal on backdrop click
+  document.getElementById('inviteModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('inviteModal')) closeModal();
+  });
 
   function resetFilters() {
     const t = new Date(), w = new Date();
