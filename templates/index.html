@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deal Assignment Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #f4f5f7; color: #1a1a2e; min-height: 100vh; }
+
+    /* ── Header ── */
+    header {
+      background: #ff5c35; color: #fff;
+      padding: 16px 32px; display: flex; align-items: center; gap: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; }
+    header p  { font-size: .82rem; opacity: .85; margin-top: 1px; }
+
+    /* ── Filter bar ── */
+    .filters {
+      background: #fff; border-bottom: 1px solid #e2e4e9;
+      padding: 14px 32px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    }
+    .filters label { font-size: .78rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .4px; }
+    input[type="date"] {
+      border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 11px;
+      font-size: .88rem; font-family: inherit; color: #1a1a2e; outline: none;
+    }
+    input[type="date"]:focus { border-color: #ff5c35; }
+    .sep { width: 1px; height: 28px; background: #e2e4e9; }
+
+    .btn { padding: 8px 18px; border-radius: 6px; font-size: .88rem; font-weight: 600; cursor: pointer; border: none; transition: background .15s; }
+    .btn-primary { background: #ff5c35; color: #fff; }
+    .btn-primary:hover { background: #e04d2a; }
+    .btn-ghost { background: #f3f4f6; color: #374151; }
+    .btn-ghost:hover { background: #e5e7eb; }
+
+    #totalLabel { margin-left: auto; font-size: .83rem; color: #6b7280; }
+
+    /* ── Stats ── */
+    .stats { padding: 16px 32px; display: flex; gap: 16px; flex-wrap: wrap; }
+    .stat {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 10px;
+      padding: 12px 20px; text-align: center; min-width: 110px;
+    }
+    .stat .val { font-size: 1.5rem; font-weight: 700; color: #ff5c35; }
+    .stat .lbl { font-size: .75rem; color: #6b7280; margin-top: 1px; font-weight: 500; }
+
+    /* ── Deal cards ── */
+    .cards { padding: 0 32px 40px; display: flex; flex-direction: column; gap: 12px; }
+
+    .card {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 10px;
+      overflow: hidden; transition: box-shadow .15s;
+    }
+    .card:hover { box-shadow: 0 2px 12px rgba(0,0,0,.07); }
+
+    /* top info row */
+    .card-header {
+      padding: 14px 20px; display: flex; align-items: center; gap: 16px;
+      border-bottom: 1px solid #f0f0f0; flex-wrap: wrap;
+    }
+    .deal-name { font-weight: 700; font-size: .95rem; color: #1a1a2e; flex: 1; min-width: 160px; }
+    .meta { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+    .meta-item { font-size: .8rem; color: #6b7280; display: flex; flex-direction: column; gap: 1px; }
+    .meta-item strong { color: #374151; font-weight: 600; }
+    .stage-badge {
+      display: inline-block; padding: 3px 10px; border-radius: 20px;
+      font-size: .74rem; font-weight: 600; background: #eff6ff; color: #2563eb; white-space: nowrap;
+    }
+    .amount { font-weight: 700; color: #059669; font-size: .9rem; }
+
+    /* role dropdowns row */
+    .card-body {
+      padding: 14px 20px 0; display: grid;
+      grid-template-columns: repeat(4, 1fr) auto;
+      gap: 12px; align-items: end;
+    }
+
+    /* SD Need Discovery section */
+    .card-needs {
+      padding: 12px 20px 16px;
+      border-top: 1px solid #f0f0f0;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .needs-label {
+      font-size: .73rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: #6b7280;
+    }
+    .needs-label span {
+      font-weight: 400; text-transform: none; letter-spacing: 0;
+      color: #9ca3af; font-size: .72rem; margin-left: 6px;
+    }
+    textarea.needs-input {
+      width: 100%; border: 1px solid #d1d5db; border-radius: 7px;
+      padding: 9px 12px; font-size: .88rem; font-family: inherit;
+      color: #1a1a2e; resize: vertical; min-height: 72px;
+      outline: none; transition: border-color .2s, box-shadow .2s;
+      line-height: 1.5;
+    }
+    textarea.needs-input:focus { border-color: #ff5c35; box-shadow: 0 0 0 3px rgba(255,92,53,.1); }
+    textarea.needs-input.dirty  { background: #fffbeb; border-color: #fcd34d; }
+    textarea.needs-input.has-value { background: #f8faff; border-color: #93c5fd; }
+
+    .role-group { display: flex; flex-direction: column; gap: 5px; }
+    .role-label {
+      font-size: .73rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: #6b7280;
+    }
+    .role-label.client { color: #7c3aed; }
+    .role-label.sd     { color: #2563eb; }
+    .role-label.am     { color: #059669; }
+    .role-label.se     { color: #d97706; }
+
+    select.role-select {
+      border: 1px solid #d1d5db; border-radius: 7px; padding: 8px 10px;
+      font-size: .86rem; font-family: inherit; color: #1a1a2e;
+      background: #fff; outline: none; cursor: pointer; width: 100%;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    select.role-select:focus { border-color: #ff5c35; box-shadow: 0 0 0 3px rgba(255,92,53,.1); }
+    select.role-select.has-value { background: #f8faff; border-color: #93c5fd; }
+    select.role-select.dirty     { background: #fffbeb; border-color: #fcd34d; }
+
+    .submit-col { display: flex; align-items: flex-end; }
+    .btn-submit {
+      padding: 9px 20px; border-radius: 7px; font-size: .88rem; font-weight: 600;
+      cursor: pointer; border: none; background: #ff5c35; color: #fff;
+      white-space: nowrap; transition: background .15s, opacity .15s;
+    }
+    .btn-submit:hover { background: #e04d2a; }
+    .btn-submit:disabled { opacity: .5; cursor: not-allowed; background: #ff5c35; }
+    .btn-submit.saved { background: #059669; }
+
+    /* ── Empty / loading ── */
+    .state-box {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 10px;
+      padding: 60px 20px; text-align: center; color: #9ca3af; font-size: .95rem;
+    }
+    .spinner {
+      display: inline-block; width: 20px; height: 20px;
+      border: 3px solid #e2e4e9; border-top-color: #ff5c35;
+      border-radius: 50%; animation: spin .7s linear infinite;
+      vertical-align: middle; margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: #1a1a2e; color: #fff; padding: 11px 18px;
+      border-radius: 8px; font-size: .86rem; font-weight: 500;
+      opacity: 0; transform: translateY(8px);
+      transition: opacity .2s, transform .2s; pointer-events: none; z-index: 999;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.error { background: #dc2626; }
+
+    /* responsive */
+    @media (max-width: 900px) {
+      .card-body { grid-template-columns: 1fr 1fr; }
+      .submit-col { grid-column: 1 / -1; }
+    }
+    @media (max-width: 600px) {
+      .card-body { grid-template-columns: 1fr; }
+      .filters { padding: 12px 16px; }
+      .cards, .stats { padding-left: 16px; padding-right: 16px; }
+      .card-header { padding: 12px 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="rgba(255,255,255,.2)"/>
+    <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>Deal Assignment Dashboard</h1>
+    <p>Assign Client, Sales Development, Account Manager, and Sales Executive to new deals</p>
+  </div>
+</header>
+
+<div class="filters">
+  <label>From</label>
+  <input type="date" id="startDate" />
+  <label>To</label>
+  <input type="date" id="endDate" />
+  <div class="sep"></div>
+  <button class="btn btn-primary" onclick="loadDeals()">Search</button>
+  <button class="btn btn-ghost" onclick="resetFilters()">Reset</button>
+  <span id="totalLabel"></span>
+</div>
+
+<div class="stats" id="statsBar" style="display:none">
+  <div class="stat"><div class="val" id="sTotal">0</div><div class="lbl">Total Deals</div></div>
+  <div class="stat"><div class="val" id="sUnassigned">0</div><div class="lbl">Fully Unassigned</div></div>
+  <div class="stat"><div class="val" id="sPartial">0</div><div class="lbl">Partially Assigned</div></div>
+  <div class="stat"><div class="val" id="sComplete">0</div><div class="lbl">Fully Assigned</div></div>
+</div>
+
+<div class="cards" id="cardsWrap">
+  <div class="state-box">Select a date range and click Search</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  let allOwners = [];
+  let allDeals  = [];
+
+  // Client options come from the server (rs_partner enum)
+  const CLIENT_OPTIONS = {{ client_options | tojson }};
+
+  // Default: last 7 days
+  const today = new Date(), weekAgo = new Date();
+  weekAgo.setDate(today.getDate() - 7);
+  document.getElementById('startDate').value = weekAgo.toISOString().slice(0,10);
+  document.getElementById('endDate').value   = today.toISOString().slice(0,10);
+
+  const ROLE_KEYS = ['client','sd','am','se'];
+  const ROLE_META = {
+    client: { label: 'Client (Sales Focus)', cls: 'client', type: 'enum'  },
+    sd:     { label: 'Sales Dev',            cls: 'sd',     type: 'owner' },
+    am:     { label: 'Account Manager',      cls: 'am',     type: 'owner' },
+    se:     { label: 'Sales Executive',      cls: 'se',     type: 'owner' },
+  };
+
+  // Load owners once on startup
+  async function loadOwners() {
+    try {
+      const r = await fetch('/api/owners');
+      const d = await r.json();
+      allOwners = d.owners || [];
+    } catch(e) {
+      console.warn('Could not load owners:', e);
+    }
+  }
+
+  function resetFilters() {
+    const t = new Date(), w = new Date();
+    w.setDate(t.getDate() - 7);
+    document.getElementById('startDate').value = w.toISOString().slice(0,10);
+    document.getElementById('endDate').value   = t.toISOString().slice(0,10);
+    document.getElementById('cardsWrap').innerHTML = '<div class="state-box">Select a date range and click Search</div>';
+    document.getElementById('statsBar').style.display = 'none';
+    document.getElementById('totalLabel').textContent = '';
+    allDeals = [];
+  }
+
+  async function loadDeals() {
+    const start = document.getElementById('startDate').value;
+    const end   = document.getElementById('endDate').value;
+    if (!start || !end) return showToast('Pick a date range first', true);
+
+    document.getElementById('cardsWrap').innerHTML =
+      '<div class="state-box"><span class="spinner"></span>Loading deals from HubSpot…</div>';
+    document.getElementById('statsBar').style.display = 'none';
+
+    try {
+      const [dealsResp] = await Promise.all([
+        fetch(`/api/deals?start=${start}&end=${end}`),
+        allOwners.length ? Promise.resolve() : loadOwners(),
+      ]);
+      const data = await dealsResp.json();
+      if (!dealsResp.ok) throw new Error(data.error || 'Failed to load deals');
+      allDeals = data.deals;
+      document.getElementById('totalLabel').textContent =
+        `${data.total} deal${data.total !== 1 ? 's' : ''} in range`;
+      render();
+    } catch(e) {
+      document.getElementById('cardsWrap').innerHTML = `<div class="state-box">⚠ ${esc(e.message)}</div>`;
+      showToast(e.message, true);
+    }
+  }
+
+  function render() {
+    updateStats();
+    document.getElementById('statsBar').style.display = 'flex';
+
+    if (!allDeals.length) {
+      document.getElementById('cardsWrap').innerHTML = '<div class="state-box">No deals found in this date range</div>';
+      return;
+    }
+
+    document.getElementById('cardsWrap').innerHTML = allDeals.map(d => cardHtml(d)).join('');
+  }
+
+  function ownerOptions(selectedId) {
+    const none = `<option value="">— Select —</option>`;
+    return none + allOwners.map(o =>
+      `<option value="${esc(o.id)}" ${o.id === selectedId ? 'selected' : ''}>${esc(o.name)}</option>`
+    ).join('');
+  }
+
+  function clientOptions(selectedValue) {
+    const none = `<option value="">— Select client —</option>`;
+    return none + CLIENT_OPTIONS.map(o =>
+      `<option value="${esc(o.value)}" ${o.value === selectedValue ? 'selected' : ''}>${esc(o.label)}</option>`
+    ).join('');
+  }
+
+  function cardHtml(d) {
+    const hasValue = k => !!d[k];
+    const allFilled = ROLE_KEYS.every(hasValue);
+    const statusCls = allFilled ? 'saved' : '';
+
+    const dropdowns = ROLE_KEYS.map(k => {
+      const meta = ROLE_META[k];
+      const opts = meta.type === 'enum' ? clientOptions(d[k]) : ownerOptions(d[k]);
+      return `
+        <div class="role-group">
+          <span class="role-label ${meta.cls}">${meta.label}</span>
+          <select class="role-select ${d[k] ? 'has-value' : ''}"
+                  data-deal="${d.id}" data-role="${k}"
+                  onchange="markDirty(this)">
+            ${opts}
+          </select>
+        </div>`;
+    }).join('');
+
+    const needsHasValue = !!d.business_needs;
+
+    return `
+    <div class="card" id="card-${d.id}">
+      <div class="card-header">
+        <div class="deal-name">${esc(d.name)}</div>
+        <div class="meta">
+          <div class="meta-item"><span>Created</span><strong>${esc(d.created)}</strong></div>
+          <div class="meta-item"><span>Owner</span><strong>${esc(d.owner) || '—'}</strong></div>
+          <div class="meta-item"><span>Stage</span><span class="stage-badge">${esc(stageLabel(d.stage))}</span></div>
+          ${d.amount ? `<div class="amount">${esc(d.amount)}</div>` : ''}
+        </div>
+      </div>
+      <div class="card-body">
+        ${dropdowns}
+        <div class="submit-col">
+          <button class="btn-submit ${statusCls}" id="btn-${d.id}"
+                  onclick="submitDeal('${d.id}')">
+            ${allFilled ? '✓ Saved' : 'Submit'}
+          </button>
+        </div>
+      </div>
+      <div class="card-needs">
+        <div class="needs-label">SD Need Discovery <span>· business_needs</span></div>
+        <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
+                  id="needs-${d.id}"
+                  data-deal="${d.id}"
+                  placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
+                  oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
+      </div>
+    </div>`;
+  }
+
+  function markDirty(select) {
+    select.classList.remove('has-value');
+    select.classList.add('dirty');
+    const btn = document.getElementById(`btn-${select.dataset.deal}`);
+    btn.textContent = 'Submit';
+    btn.classList.remove('saved');
+    btn.disabled = false;
+  }
+
+  function markNeedsDirty(textarea) {
+    textarea.classList.remove('has-value');
+    textarea.classList.add('dirty');
+    const btn = document.getElementById(`btn-${textarea.dataset.deal}`);
+    btn.textContent = 'Submit';
+    btn.classList.remove('saved');
+    btn.disabled = false;
+  }
+
+  async function submitDeal(dealId) {
+    const card = document.getElementById(`card-${dealId}`);
+    const selects  = card.querySelectorAll('select.role-select');
+    const textarea = document.getElementById(`needs-${dealId}`);
+    const btn = document.getElementById(`btn-${dealId}`);
+
+    const payload = {};
+    selects.forEach(s => { payload[s.dataset.role] = s.value; });
+    if (textarea) payload.business_needs = textarea.value;
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      const resp = await fetch(`/api/deals/${dealId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Save failed');
+
+      // Update local state
+      const deal = allDeals.find(d => d.id === dealId);
+      if (deal) Object.assign(deal, payload);
+
+      // Update UI
+      selects.forEach(s => {
+        s.classList.remove('dirty');
+        s.classList.toggle('has-value', !!s.value);
+      });
+      if (textarea) {
+        textarea.classList.remove('dirty');
+        textarea.classList.toggle('has-value', !!textarea.value);
+      }
+      btn.textContent = '✓ Saved';
+      btn.classList.add('saved');
+      btn.disabled = false;
+      updateStats();
+      showToast('Deal updated in HubSpot');
+    } catch(e) {
+      btn.textContent = 'Submit';
+      btn.disabled = false;
+      showToast('Failed to save — ' + e.message, true);
+    }
+  }
+
+  function updateStats() {
+    const total    = allDeals.length;
+    const complete = allDeals.filter(d => ROLE_KEYS.every(k => !!d[k])).length;
+    const partial  = allDeals.filter(d => ROLE_KEYS.some(k => !!d[k]) && !ROLE_KEYS.every(k => !!d[k])).length;
+    const none     = allDeals.filter(d => ROLE_KEYS.every(k => !d[k])).length;
+    document.getElementById('sTotal').textContent      = total;
+    document.getElementById('sUnassigned').textContent = none;
+    document.getElementById('sPartial').textContent    = partial;
+    document.getElementById('sComplete').textContent   = complete;
+  }
+
+  function stageLabel(s) {
+    return s ? s.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase()) : '—';
+  }
+
+  function esc(str) {
+    return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  let toastTimer;
+  function showToast(msg, isError=false) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'show' + (isError ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.className='', 3000);
+  }
+
+  document.querySelectorAll('input[type=date]').forEach(el =>
+    el.addEventListener('keydown', e => e.key === 'Enter' && loadDeals())
+  );
+
+  // Pre-load owners in background
+  loadOwners();
+</script>
+</body>
+</html>
