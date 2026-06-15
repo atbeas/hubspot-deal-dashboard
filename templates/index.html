@@ -160,6 +160,12 @@
       font-size: .73rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: .5px; color: #6b7280;
     }
+    input.meeting-search {
+      border: 1px solid #d1d5db; border-radius: 7px; padding: 7px 10px;
+      font-size: .86rem; font-family: inherit; color: #1a1a2e;
+      outline: none; width: 100%; transition: border-color .2s;
+    }
+    input.meeting-search:focus { border-color: #ff5c35; }
     select.meeting-select {
       border: 1px solid #d1d5db; border-radius: 7px; padding: 8px 10px;
       font-size: .86rem; font-family: inherit; color: #1a1a2e;
@@ -291,6 +297,16 @@
     } catch(e) {
       console.warn('Could not load meetings:', e);
     }
+  }
+
+  function filterMeetings(dealId, query) {
+    const sel = document.getElementById(`meeting-${dealId}`);
+    const q   = query.toLowerCase();
+    Array.from(sel.options).forEach(opt => {
+      opt.hidden = opt.value !== '' && !opt.text.toLowerCase().includes(q);
+    });
+    // Reset selection if current choice is now hidden
+    if (sel.selectedOptions[0]?.hidden) sel.value = '';
   }
 
   async function addToInvite(dealId) {
@@ -442,7 +458,9 @@
       <div class="card-meeting">
         <div class="meeting-group">
           <span class="meeting-label">Add Team to Calendar Invite</span>
-          <select class="meeting-select" id="meeting-${d.id}">
+          <input class="meeting-search" type="text" placeholder="Search meetings…"
+                 oninput="filterMeetings('${d.id}', this.value)" />
+          <select class="meeting-select" id="meeting-${d.id}" size="1">
             <option value="">— Select meeting —</option>
             ${allMeetings.map(m => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}
           </select>
