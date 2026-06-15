@@ -68,7 +68,8 @@
       padding: 14px 20px; display: flex; align-items: center; gap: 16px;
       border-bottom: 1px solid #f0f0f0; flex-wrap: wrap;
     }
-    .deal-name { font-weight: 700; font-size: .95rem; color: #1a1a2e; flex: 1; min-width: 160px; }
+    .deal-name { font-weight: 700; font-size: .95rem; color: #1a1a2e; flex: 1; min-width: 160px; text-decoration: none; }
+    .deal-name:hover { color: #ff5c35; text-decoration: underline; }
     .meta { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
     .meta-item { font-size: .8rem; color: #6b7280; display: flex; flex-direction: column; gap: 1px; }
     .meta-item strong { color: #374151; font-weight: 600; }
@@ -346,7 +347,7 @@
     return `
     <div class="card" id="card-${d.id}">
       <div class="card-header">
-        <div class="deal-name">${esc(d.name)}</div>
+        <a class="deal-name" href="https://app.hubspot.com/contacts/23416553/deal/${d.id}" target="_blank" rel="noopener">${esc(d.name)}</a>
         <div class="meta">
           <div class="meta-item"><span>Created</span><strong>${esc(d.created)}</strong></div>
           <div class="meta-item"><span>Owner</span><strong>${esc(d.owner) || '—'}</strong></div>
