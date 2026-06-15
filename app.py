@@ -1,13 +1,25 @@
 import os
+import secrets
 import requests
-from flask import Flask, jsonify, render_template, request
+from functools import wraps
+from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from datetime import datetime
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
 
 HUBSPOT_API_KEY = os.environ.get("HUBSPOT_API_KEY")
+APP_PASSWORD     = os.environ.get("APP_PASSWORD", "")
 BASE_URL = "https://api.hubapi.com"
 HEADERS = {"Authorization": f"Bearer {HUBSPOT_API_KEY}", "Content-Type": "application/json"}
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("authenticated"):
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated
 
 # Real HubSpot deal property names
 ROLE_PROPS = {
@@ -21,7 +33,23 @@ ROLE_PROPS = {
 OWNER_ROLES = {"sd", "am", "se"}
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        if request.form.get("password") == APP_PASSWORD:
+            session["authenticated"] = True
+            return redirect(url_for("index"))
+        error = "Incorrect password."
+    return render_template("login.html", error=error)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
 @app.route("/")
+@login_required
 def index():
     # Fetch rs_partner enum options to pass into the template
     client_options = []
@@ -40,6 +68,7 @@ def index():
 
 
 @app.route("/api/owners")
+@login_required
 def get_owners():
     owners = []
     after = None
@@ -68,6 +97,7 @@ def get_owners():
 
 
 @app.route("/api/deals")
+@login_required
 def get_deals():
     start = request.args.get("start")
     end   = request.args.get("end")
@@ -153,6 +183,7 @@ def get_deals():
 
 
 @app.route("/api/deals/<deal_id>", methods=["PATCH"])
+@login_required
 def update_deal(deal_id):
     body = request.get_json()
     properties = {}
