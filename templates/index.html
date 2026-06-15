@@ -155,24 +155,41 @@
       border-top: 1px solid #f0f0f0;
       display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
     }
-    .meeting-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 220px; }
+    .meeting-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 220px; position: relative; }
     .meeting-label {
       font-size: .73rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: .5px; color: #6b7280;
     }
-    input.meeting-search {
-      border: 1px solid #d1d5db; border-radius: 7px; padding: 7px 10px;
-      font-size: .86rem; font-family: inherit; color: #1a1a2e;
-      outline: none; width: 100%; transition: border-color .2s;
-    }
-    input.meeting-search:focus { border-color: #ff5c35; }
-    select.meeting-select {
+    .meeting-trigger {
       border: 1px solid #d1d5db; border-radius: 7px; padding: 8px 10px;
-      font-size: .86rem; font-family: inherit; color: #1a1a2e;
-      background: #fff; outline: none; cursor: pointer; width: 100%;
-      transition: border-color .2s;
+      font-size: .86rem; font-family: inherit; color: #6b7280;
+      background: #fff; cursor: pointer; width: 100%; text-align: left;
+      display: flex; justify-content: space-between; align-items: center;
+      transition: border-color .2s; white-space: nowrap; overflow: hidden;
     }
-    select.meeting-select:focus { border-color: #ff5c35; }
+    .meeting-trigger.has-value { color: #1a1a2e; }
+    .meeting-trigger:focus, .meeting-trigger.open { border-color: #ff5c35; outline: none; }
+    .meeting-trigger .trigger-text { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+    .meeting-trigger .trigger-arrow { margin-left: 8px; font-size: .7rem; color: #9ca3af; flex-shrink: 0; }
+    .meeting-dropdown {
+      display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+      background: #fff; border: 1px solid #d1d5db; border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.12); z-index: 100; overflow: hidden;
+    }
+    .meeting-dropdown.open { display: block; }
+    .meeting-dropdown-search {
+      width: 100%; padding: 9px 12px; border: none; border-bottom: 1px solid #e5e7eb;
+      font-size: .86rem; font-family: inherit; outline: none; color: #1a1a2e;
+    }
+    .meeting-list { max-height: 200px; overflow-y: auto; }
+    .meeting-option {
+      padding: 8px 12px; font-size: .86rem; color: #1a1a2e; cursor: pointer;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .meeting-option:hover { background: #f3f4f6; }
+    .meeting-option.selected { background: #eff6ff; color: #2563eb; font-weight: 600; }
+    .meeting-option.hidden { display: none; }
+    .meeting-empty { padding: 10px 12px; font-size: .84rem; color: #9ca3af; }
     .btn-invite {
       padding: 9px 20px; border-radius: 7px; font-size: .88rem; font-weight: 600;
       cursor: pointer; border: none; background: #2563eb; color: #fff;
@@ -299,15 +316,58 @@
     }
   }
 
-  function filterMeetings(dealId, query) {
-    const sel = document.getElementById(`meeting-${dealId}`);
-    const q   = query.toLowerCase();
-    Array.from(sel.options).forEach(opt => {
-      opt.hidden = opt.value !== '' && !opt.text.toLowerCase().includes(q);
-    });
-    // Reset selection if current choice is now hidden
-    if (sel.selectedOptions[0]?.hidden) sel.value = '';
+  function toggleMeetingDropdown(dealId) {
+    const drop    = document.getElementById(`meetingdrop-${dealId}`);
+    const trigger = document.getElementById(`meetingtrigger-${dealId}`);
+    const isOpen  = drop.classList.toggle('open');
+    trigger.classList.toggle('open', isOpen);
+    if (isOpen) {
+      const search = drop.querySelector('.meeting-dropdown-search');
+      search.value = '';
+      filterMeetingOptions(dealId, '');
+      search.focus();
+    }
   }
+
+  function filterMeetingOptions(dealId, query) {
+    const q       = query.toLowerCase();
+    const list    = document.getElementById(`meetinglist-${dealId}`);
+    let   visible = 0;
+    list.querySelectorAll('.meeting-option').forEach(el => {
+      const match = el.dataset.label.toLowerCase().includes(q);
+      el.classList.toggle('hidden', !match);
+      if (match) visible++;
+    });
+    let empty = list.querySelector('.meeting-empty');
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.className = 'meeting-empty';
+      empty.textContent = 'No matches';
+      list.appendChild(empty);
+    }
+    empty.style.display = visible ? 'none' : 'block';
+  }
+
+  function selectMeeting(dealId, el) {
+    document.getElementById(`meeting-${dealId}`).value        = el.dataset.id;
+    document.getElementById(`meetingtext-${dealId}`).textContent = el.dataset.label;
+    document.getElementById(`meetingtrigger-${dealId}`).classList.add('has-value');
+    document.getElementById(`meetingdrop-${dealId}`).classList.remove('open');
+    document.getElementById(`meetingtrigger-${dealId}`).classList.remove('open');
+    document.getElementById(`meetinglist-${dealId}`).querySelectorAll('.meeting-option')
+      .forEach(o => o.classList.toggle('selected', o === el));
+  }
+
+  // Close dropdowns when clicking outside
+  document.addEventListener('click', e => {
+    document.querySelectorAll('.meeting-dropdown.open').forEach(drop => {
+      const group = drop.closest('.meeting-group');
+      if (!group.contains(e.target)) {
+        drop.classList.remove('open');
+        group.querySelector('.meeting-trigger').classList.remove('open');
+      }
+    });
+  });
 
   async function addToInvite(dealId) {
     const eventId = document.getElementById(`meeting-${dealId}`).value;
@@ -456,14 +516,29 @@
         </div>
       </div>
       <div class="card-meeting">
-        <div class="meeting-group">
+        <div class="meeting-group" id="meetinggroup-${d.id}">
           <span class="meeting-label">Add Team to Calendar Invite</span>
-          <input class="meeting-search" type="text" placeholder="Search meetings…"
-                 oninput="filterMeetings('${d.id}', this.value)" />
-          <select class="meeting-select" id="meeting-${d.id}" size="1">
-            <option value="">— Select meeting —</option>
-            ${allMeetings.map(m => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}
-          </select>
+          <button type="button" class="meeting-trigger" id="meetingtrigger-${d.id}"
+                  onclick="toggleMeetingDropdown('${d.id}')">
+            <span class="trigger-text" id="meetingtext-${d.id}">— Select meeting —</span>
+            <span class="trigger-arrow">▼</span>
+          </button>
+          <div class="meeting-dropdown" id="meetingdrop-${d.id}">
+            <input class="meeting-dropdown-search" type="text" placeholder="Search meetings…"
+                   oninput="filterMeetingOptions('${d.id}', this.value)"
+                   onclick="event.stopPropagation()" />
+            <div class="meeting-list" id="meetinglist-${d.id}">
+              ${allMeetings.length
+                ? allMeetings.map(m => `
+                  <div class="meeting-option" data-id="${esc(m.id)}" data-label="${esc(m.label)}"
+                       onclick="selectMeeting('${d.id}', this)">
+                    ${esc(m.label)}
+                  </div>`).join('')
+                : '<div class="meeting-empty">No meetings found</div>'
+              }
+            </div>
+          </div>
+          <input type="hidden" id="meeting-${d.id}" value="" />
         </div>
         <button class="btn-invite" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
           Add to Invite
