@@ -82,10 +82,15 @@
 
     /* SD Need Discovery section */
     .card-needs {
-      padding: 12px 20px 16px;
       border-top: 1px solid #f0f0f0;
-      display: flex; flex-direction: column; gap: 6px;
     }
+    .needs-toggle {
+      width: 100%; padding: 10px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+      background: none; border: none; cursor: pointer;
+      font-family: inherit; text-align: left;
+    }
+    .needs-toggle:hover { background: #fafafa; }
     .needs-label {
       font-size: .73rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: .5px; color: #6b7280;
@@ -94,12 +99,21 @@
       font-weight: 400; text-transform: none; letter-spacing: 0;
       color: #9ca3af; font-size: .72rem; margin-left: 6px;
     }
+    .needs-chevron {
+      font-size: .75rem; color: #9ca3af;
+      transition: transform .2s;
+    }
+    .needs-chevron.open { transform: rotate(180deg); }
+    .needs-body {
+      display: none; padding: 0 20px 16px;
+    }
+    .needs-body.open { display: block; }
     textarea.needs-input {
       width: 100%; border: 1px solid #d1d5db; border-radius: 7px;
       padding: 9px 12px; font-size: .88rem; font-family: inherit;
-      color: #1a1a2e; resize: vertical; min-height: 72px;
+      color: #1a1a2e; resize: none; overflow: hidden;
       outline: none; transition: border-color .2s, box-shadow .2s;
-      line-height: 1.5;
+      line-height: 1.5; min-height: 72px;
     }
     textarea.needs-input:focus { border-color: #ff5c35; box-shadow: 0 0 0 3px rgba(255,92,53,.1); }
     textarea.needs-input.dirty  { background: #fffbeb; border-color: #fcd34d; }
@@ -438,12 +452,17 @@
         </button>
       </div>
       <div class="card-needs">
-        <div class="needs-label">SD Need Discovery <span>· business_needs</span></div>
-        <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
-                  id="needs-${d.id}"
-                  data-deal="${d.id}"
-                  placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
-                  oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
+        <button class="needs-toggle" onclick="toggleNeeds('${d.id}')">
+          <span class="needs-label">SD Need Discovery <span>· business_needs</span></span>
+          <span class="needs-chevron ${needsHasValue ? 'open' : ''}" id="chevron-${d.id}">▼</span>
+        </button>
+        <div class="needs-body ${needsHasValue ? 'open' : ''}" id="needsbody-${d.id}">
+          <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
+                    id="needs-${d.id}"
+                    data-deal="${d.id}"
+                    placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
+                    oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
+        </div>
       </div>
     </div>`;
   }
@@ -457,7 +476,22 @@
     btn.disabled = false;
   }
 
+  function autoResize(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+  }
+
+  function toggleNeeds(dealId) {
+    const body    = document.getElementById(`needsbody-${dealId}`);
+    const chevron = document.getElementById(`chevron-${dealId}`);
+    const ta      = document.getElementById(`needs-${dealId}`);
+    const isOpen  = body.classList.toggle('open');
+    chevron.classList.toggle('open', isOpen);
+    if (isOpen) autoResize(ta);
+  }
+
   function markNeedsDirty(textarea) {
+    autoResize(textarea);
     textarea.classList.remove('has-value');
     textarea.classList.add('dirty');
     const btn = document.getElementById(`btn-${textarea.dataset.deal}`);
