@@ -230,10 +230,10 @@
   // Client options come from the server (rs_partner enum)
   const CLIENT_OPTIONS = {{ client_options | tojson }};
 
-  // Default: last 7 days
-  const today = new Date(), weekAgo = new Date();
-  weekAgo.setDate(today.getDate() - 7);
-  document.getElementById('startDate').value = weekAgo.toISOString().slice(0,10);
+  // Default: last 2 months
+  const today = new Date(), twoMonthsAgo = new Date();
+  twoMonthsAgo.setMonth(today.getMonth() - 2);
+  document.getElementById('startDate').value = twoMonthsAgo.toISOString().slice(0,10);
   document.getElementById('endDate').value   = today.toISOString().slice(0,10);
 
   const ROLE_KEYS = ['client','sd','am','se'];
@@ -257,7 +257,7 @@
 
   function resetFilters() {
     const t = new Date(), w = new Date();
-    w.setDate(t.getDate() - 7);
+    w.setMonth(t.getMonth() - 2);
     document.getElementById('startDate').value = w.toISOString().slice(0,10);
     document.getElementById('endDate').value   = t.toISOString().slice(0,10);
     document.getElementById('pipelineFilter').value = '';
