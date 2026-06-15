@@ -82,14 +82,7 @@ def index():
             if not o.get("hidden")
         ]
 
-    # Fetch deal pipelines
-    pipeline_options = []
-    resp = requests.get(f"{BASE_URL}/crm/v3/pipelines/deals", headers=HEADERS)
-    if resp.ok:
-        for p in resp.json().get("results", []):
-            pipeline_options.append({"label": p["label"], "value": p["id"]})
-
-    return render_template("index.html", client_options=client_options, pipeline_options=pipeline_options)
+    return render_template("index.html", client_options=client_options)
 
 
 @app.route("/api/owners")
@@ -124,9 +117,8 @@ def get_owners():
 @app.route("/api/deals")
 @login_required
 def get_deals():
-    start    = request.args.get("start")
-    end      = request.args.get("end")
-    pipeline = request.args.get("pipeline", "")
+    start = request.args.get("start")
+    end   = request.args.get("end")
     if not start or not end:
         return jsonify({"error": "start and end required"}), 400
 
@@ -141,9 +133,8 @@ def get_deals():
     filters = [
         {"propertyName": "createdate", "operator": "GTE", "value": str(start_ms)},
         {"propertyName": "createdate", "operator": "LTE", "value": str(end_ms)},
+        {"propertyName": "pipeline",   "operator": "EQ",  "value": "default"},
     ]
-    if pipeline:
-        filters.append({"propertyName": "pipeline", "operator": "EQ", "value": pipeline})
 
     payload = {
         "filterGroups": [{"filters": filters}],

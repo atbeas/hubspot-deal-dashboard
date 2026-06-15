@@ -29,12 +29,6 @@
       font-size: .88rem; font-family: inherit; color: #1a1a2e; outline: none;
     }
     input[type="date"]:focus { border-color: #ff5c35; }
-    select.filter-select {
-      border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 11px;
-      font-size: .88rem; font-family: inherit; color: #1a1a2e; outline: none;
-      background: #fff; cursor: pointer; min-width: 160px;
-    }
-    select.filter-select:focus { border-color: #ff5c35; }
     .sep { width: 1px; height: 28px; background: #e2e4e9; }
 
     .btn { padding: 8px 18px; border-radius: 6px; font-size: .88rem; font-weight: 600; cursor: pointer; border: none; transition: background .15s; }
@@ -224,14 +218,6 @@
   <label>To</label>
   <input type="date" id="endDate" />
   <div class="sep"></div>
-  <label>Pipeline</label>
-  <select class="filter-select" id="pipelineFilter">
-    <option value="">All Pipelines</option>
-    {% for p in pipeline_options %}
-    <option value="{{ p.value }}">{{ p.label }}</option>
-    {% endfor %}
-  </select>
-  <div class="sep"></div>
   <button class="btn btn-primary" onclick="loadDeals()">Search</button>
   <button class="btn btn-ghost" onclick="resetFilters()">Reset</button>
   <span id="totalLabel"></span>
@@ -337,7 +323,6 @@
     w.setMonth(t.getMonth() - 2);
     document.getElementById('startDate').value = w.toISOString().slice(0,10);
     document.getElementById('endDate').value   = t.toISOString().slice(0,10);
-    document.getElementById('pipelineFilter').value = '';
     document.getElementById('cardsWrap').innerHTML = '<div class="state-box">Select a date range and click Search</div>';
     document.getElementById('statsBar').style.display = 'none';
     document.getElementById('totalLabel').textContent = '';
@@ -345,9 +330,8 @@
   }
 
   async function loadDeals() {
-    const start    = document.getElementById('startDate').value;
-    const end      = document.getElementById('endDate').value;
-    const pipeline = document.getElementById('pipelineFilter').value;
+    const start = document.getElementById('startDate').value;
+    const end   = document.getElementById('endDate').value;
     if (!start || !end) return showToast('Pick a date range first', true);
 
     document.getElementById('cardsWrap').innerHTML =
@@ -355,7 +339,6 @@
     document.getElementById('statsBar').style.display = 'none';
 
     const params = new URLSearchParams({ start, end });
-    if (pipeline) params.set('pipeline', pipeline);
 
     try {
       const [dealsResp] = await Promise.all([
