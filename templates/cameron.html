@@ -108,7 +108,7 @@
     .charts-row {
       padding: 20px 32px 0;
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr;
       gap: 16px;
     }
     .chart-card {
@@ -171,6 +171,10 @@
     <div class="val" id="statEmails">—</div>
     <div class="lbl">Emails Today</div>
   </div>
+  <div class="stat">
+    <div class="val" id="statLinkedIn" style="color:#0a66c2">—</div>
+    <div class="lbl">LinkedIn Today</div>
+  </div>
 </div>
 
 <div class="charts-row">
@@ -189,6 +193,14 @@
       <button class="refresh-btn" title="Refresh" onclick="loadTrends()">↻</button>
     </div>
     <canvas id="emailsTrendChart"></canvas>
+  </div>
+  <div class="chart-card">
+    <div class="chart-card-header">
+      <h3>LinkedIn per Day — Last 30 Days</h3>
+      <span class="chart-updated">Updated <span id="linkedinUpdatedAt">—</span></span>
+      <button class="refresh-btn" title="Refresh" onclick="loadTrends()">↻</button>
+    </div>
+    <canvas id="linkedinTrendChart"></canvas>
   </div>
 </div>
 
@@ -212,6 +224,26 @@
       </thead>
       <tbody id="callsBody">
         <tr class="empty-row"><td colspan="5">Select a date and click Load.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- LinkedIn Report -->
+  <div class="report">
+    <div class="report-header">
+      <h2>LinkedIn Messages</h2>
+      <span class="count-badge" id="linkedinBadge" style="background:#0a66c2">0</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:80px">Time</th>
+          <th>Contact</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody id="linkedinBody">
+        <tr class="empty-row"><td colspan="3">Select a date and click Load.</td></tr>
       </tbody>
     </table>
   </div>
@@ -319,11 +351,36 @@
     `).join('');
   }
 
+  async function loadLinkedIn(date) {
+    const body = document.getElementById('linkedinBody');
+    body.innerHTML = '<tr class="empty-row"><td colspan="3"><span class="spinner"></span>Loading…</td></tr>';
+
+    const resp = await fetch(`/api/cameron/linkedin?date=${date}`);
+    const data = await resp.json();
+
+    document.getElementById('linkedinBadge').textContent = data.total ?? 0;
+    document.getElementById('statLinkedIn').textContent  = data.total ?? 0;
+
+    if (!data.messages || data.messages.length === 0) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="3">No LinkedIn messages logged for this date.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = data.messages.map(m => `
+      <tr>
+        <td class="time-cell">${m.time || '—'}</td>
+        <td class="title-cell">${m.contact || '—'}</td>
+        <td class="status-cell">${m.notes || ''}</td>
+      </tr>
+    `).join('');
+  }
+
   function loadAll() {
     const date = document.getElementById('datePicker').value;
     if (!date) return;
     loadCalls(date);
     loadEmails(date);
+    loadLinkedIn(date);
   }
 
   // Auto-load today on page open
@@ -361,7 +418,7 @@
     },
   };
 
-  let callsChart, emailsChart;
+  let callsChart, emailsChart, linkedinChart;
 
   // Browser's UTC offset in minutes (e.g. -240 for EDT)
   const tzOffset = -new Date().getTimezoneOffset();
@@ -377,8 +434,9 @@
     const data = await resp.json();
 
     const updated = fmtUpdated();
-    document.getElementById('callsUpdatedAt').textContent  = updated;
-    document.getElementById('emailsUpdatedAt').textContent = updated;
+    document.getElementById('callsUpdatedAt').textContent   = updated;
+    document.getElementById('emailsUpdatedAt').textContent  = updated;
+    document.getElementById('linkedinUpdatedAt').textContent = updated;
 
     if (callsChart) {
       callsChart.data.labels = data.labels;
@@ -417,6 +475,30 @@
             data: data.emails,
             borderColor: '#2563eb',
             backgroundColor: 'rgba(37,99,235,.1)',
+            borderWidth: 2,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            tension: 0.3,
+            fill: true,
+          }],
+        },
+        options: chartDefaults.options,
+      });
+    }
+
+    if (linkedinChart) {
+      linkedinChart.data.labels = data.labels;
+      linkedinChart.data.datasets[0].data = data.linkedin;
+      linkedinChart.update();
+    } else {
+      linkedinChart = new Chart(document.getElementById('linkedinTrendChart'), {
+        type: 'line',
+        data: {
+          labels: data.labels,
+          datasets: [{
+            data: data.linkedin,
+            borderColor: '#0a66c2',
+            backgroundColor: 'rgba(10,102,194,.1)',
             borderWidth: 2,
             pointRadius: 3,
             pointHoverRadius: 5,

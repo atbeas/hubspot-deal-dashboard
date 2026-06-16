@@ -382,6 +382,7 @@ def get_client(client_value):
 
 
 CAMERON_OWNER_ID = "93829264"
+CAMERON_LINKEDIN_SUBJECT = "CW Florida Leads"
 
 def _day_range_ms(date_str):
     """Return (start_ms, end_ms) for a YYYY-MM-DD date in UTC."""
@@ -447,15 +448,52 @@ def cameron_trends():
     call_counts  = fetch_by_day("calls",  "hs_timestamp")
     email_counts = fetch_by_day("emails", "hs_timestamp")
 
+    # LinkedIn: completed "CW Florida Leads" tasks, grouped by completion date
+    linkedin_payload = {
+        "filterGroups": [{"filters": [
+            {"propertyName": "hubspot_owner_id",       "operator": "EQ",  "value": CAMERON_OWNER_ID},
+            {"propertyName": "hs_task_subject",        "operator": "EQ",  "value": CAMERON_LINKEDIN_SUBJECT},
+            {"propertyName": "hs_task_status",         "operator": "EQ",  "value": "COMPLETED"},
+            {"propertyName": "hs_task_completion_date","operator": "GTE", "value": str(start_ms)},
+            {"propertyName": "hs_task_completion_date","operator": "LTE", "value": str(end_ms)},
+        ]}],
+        "properties": ["hs_task_completion_date"],
+        "limit": 200,
+    }
+    li_results = []
+    li_after = None
+    while True:
+        if li_after:
+            linkedin_payload["after"] = li_after
+        li_resp = requests.post(f"{BASE_URL}/crm/v3/objects/tasks/search", headers=HEADERS, json=linkedin_payload)
+        if not li_resp.ok:
+            break
+        li_data = li_resp.json()
+        li_results.extend(li_data.get("results", []))
+        li_after = li_data.get("paging", {}).get("next", {}).get("after")
+        if not li_after or len(li_results) >= 2000:
+            break
+
+    linkedin_counts = {}
+    for r in li_results:
+        ts = r.get("properties", {}).get("hs_task_completion_date")
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            day = dt.astimezone(local_tz).strftime("%Y-%m-%d")
+            linkedin_counts[day] = linkedin_counts.get(day, 0) + 1
+        except Exception:
+            pass
+
     now_local = now.astimezone(local_tz)
-    labels, call_data, email_data = [], [], []
+    labels, call_data, email_data, linkedin_data = [], [], [], []
     for i in range(days, -1, -1):
         day = (now_local - timedelta(days=i)).strftime("%Y-%m-%d")
         labels.append(day)
         call_data.append(call_counts.get(day, 0))
         email_data.append(email_counts.get(day, 0))
+        linkedin_data.append(linkedin_counts.get(day, 0))
 
-    return jsonify({"labels": labels, "calls": call_data, "emails": email_data})
+    return jsonify({"labels": labels, "calls": call_data, "emails": email_data, "linkedin": linkedin_data})
 
 
 @app.route("/api/cameron/calls")
@@ -557,6 +595,53 @@ def cameron_emails():
         })
 
     return jsonify({"emails": emails, "total": len(emails)})
+
+
+@app.route("/api/cameron/linkedin")
+@login_required
+def cameron_linkedin():
+    date_str = request.args.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    try:
+        start_ms, end_ms = _day_range_ms(date_str)
+    except ValueError:
+        return jsonify({"error": "Invalid date"}), 400
+
+    payload = {
+        "filterGroups": [{"filters": [
+            {"propertyName": "hubspot_owner_id",        "operator": "EQ",  "value": CAMERON_OWNER_ID},
+            {"propertyName": "hs_task_subject",         "operator": "EQ",  "value": CAMERON_LINKEDIN_SUBJECT},
+            {"propertyName": "hs_task_status",          "operator": "EQ",  "value": "COMPLETED"},
+            {"propertyName": "hs_task_completion_date", "operator": "GTE", "value": str(start_ms)},
+            {"propertyName": "hs_task_completion_date", "operator": "LTE", "value": str(end_ms)},
+        ]}],
+        "properties": [
+            "hs_task_subject", "hs_task_completion_date",
+            "hs_associated_contact_labels", "hs_task_body",
+        ],
+        "sorts": [{"propertyName": "hs_task_completion_date", "direction": "DESCENDING"}],
+        "limit": 200,
+    }
+
+    resp = requests.post(f"{BASE_URL}/crm/v3/objects/tasks/search", headers=HEADERS, json=payload)
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    messages = []
+    for r in resp.json().get("results", []):
+        p = r.get("properties", {})
+        ts = p.get("hs_task_completion_date")
+        try:
+            time_str = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%-I:%M %p")
+        except Exception:
+            time_str = ""
+        messages.append({
+            "id":      r["id"],
+            "time":    time_str,
+            "contact": p.get("hs_associated_contact_labels") or "—",
+            "notes":   p.get("hs_task_body") or "",
+        })
+
+    return jsonify({"messages": messages, "total": len(messages)})
 
 
 if __name__ == "__main__":
