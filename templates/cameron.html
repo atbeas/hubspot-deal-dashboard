@@ -115,10 +115,21 @@
       background: #fff; border: 1px solid #e2e4e9; border-radius: 12px;
       padding: 18px 20px;
     }
+    .chart-card-header {
+      display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px;
+    }
     .chart-card h3 {
       font-size: .85rem; font-weight: 700; color: #6b7280;
-      text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px;
+      text-transform: uppercase; letter-spacing: .5px;
     }
+    .chart-updated {
+      font-size: .75rem; color: #9ca3af; margin-left: auto;
+    }
+    .refresh-btn {
+      background: none; border: none; cursor: pointer; font-size: 1rem;
+      color: #9ca3af; padding: 0 2px; line-height: 1;
+    }
+    .refresh-btn:hover { color: #ff5c35; }
     .chart-card canvas { max-height: 160px; }
 
     /* loading spinner */
@@ -164,11 +175,19 @@
 
 <div class="charts-row">
   <div class="chart-card">
-    <h3>Calls per Day — Last 30 Days</h3>
+    <div class="chart-card-header">
+      <h3>Calls per Day — Last 30 Days</h3>
+      <span class="chart-updated">Updated <span id="callsUpdatedAt">—</span></span>
+      <button class="refresh-btn" title="Refresh" onclick="loadTrends()">↻</button>
+    </div>
     <canvas id="callsTrendChart"></canvas>
   </div>
   <div class="chart-card">
-    <h3>Emails per Day — Last 30 Days</h3>
+    <div class="chart-card-header">
+      <h3>Emails per Day — Last 30 Days</h3>
+      <span class="chart-updated">Updated <span id="emailsUpdatedAt">—</span></span>
+      <button class="refresh-btn" title="Refresh" onclick="loadTrends()">↻</button>
+    </div>
     <canvas id="emailsTrendChart"></canvas>
   </div>
 </div>
@@ -344,51 +363,75 @@
 
   let callsChart, emailsChart;
 
+  // Browser's UTC offset in minutes (e.g. -240 for EDT)
+  const tzOffset = -new Date().getTimezoneOffset();
+
+  function fmtUpdated() {
+    const now = new Date();
+    return `${now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+  }
+
   async function loadTrends() {
-    const resp = await fetch('/api/cameron/trends?days=30');
+    const resp = await fetch(`/api/cameron/trends?days=30&tz_offset=${tzOffset}`);
     if (!resp.ok) return;
     const data = await resp.json();
 
-    if (callsChart) callsChart.destroy();
-    callsChart = new Chart(document.getElementById('callsTrendChart'), {
-      ...chartDefaults,
-      data: {
-        labels: data.labels,
-        datasets: [{
-          data: data.calls,
-          borderColor: '#ff5c35',
-          backgroundColor: 'rgba(255,92,53,.1)',
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5,
-          tension: 0.3,
-          fill: true,
-        }],
-      },
-      options: { ...chartDefaults.options },
-    });
+    const updated = fmtUpdated();
+    document.getElementById('callsUpdatedAt').textContent  = updated;
+    document.getElementById('emailsUpdatedAt').textContent = updated;
 
-    if (emailsChart) emailsChart.destroy();
-    emailsChart = new Chart(document.getElementById('emailsTrendChart'), {
-      ...chartDefaults,
-      data: {
-        labels: data.labels,
-        datasets: [{
-          data: data.emails,
-          borderColor: '#2563eb',
-          backgroundColor: 'rgba(37,99,235,.1)',
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5,
-          tension: 0.3,
-          fill: true,
-        }],
-      },
-      options: { ...chartDefaults.options },
-    });
+    if (callsChart) {
+      callsChart.data.labels = data.labels;
+      callsChart.data.datasets[0].data = data.calls;
+      callsChart.update();
+    } else {
+      callsChart = new Chart(document.getElementById('callsTrendChart'), {
+        type: 'line',
+        data: {
+          labels: data.labels,
+          datasets: [{
+            data: data.calls,
+            borderColor: '#ff5c35',
+            backgroundColor: 'rgba(255,92,53,.1)',
+            borderWidth: 2,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            tension: 0.3,
+            fill: true,
+          }],
+        },
+        options: chartDefaults.options,
+      });
+    }
+
+    if (emailsChart) {
+      emailsChart.data.labels = data.labels;
+      emailsChart.data.datasets[0].data = data.emails;
+      emailsChart.update();
+    } else {
+      emailsChart = new Chart(document.getElementById('emailsTrendChart'), {
+        type: 'line',
+        data: {
+          labels: data.labels,
+          datasets: [{
+            data: data.emails,
+            borderColor: '#2563eb',
+            backgroundColor: 'rgba(37,99,235,.1)',
+            borderWidth: 2,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            tension: 0.3,
+            fill: true,
+          }],
+        },
+        options: chartDefaults.options,
+      });
+    }
   }
 
   loadTrends();
+  // Refresh charts every 2 minutes
+  setInterval(loadTrends, 2 * 60 * 1000);
 </script>
 </body>
 </html>

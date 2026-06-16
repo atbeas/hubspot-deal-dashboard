@@ -406,6 +406,10 @@ def cameron_trends():
     start_ms = int(start_day.timestamp() * 1000)
     end_ms = int(now.timestamp() * 1000)
 
+    # Use browser's timezone offset so day boundaries match the user's local time
+    tz_offset_minutes = int(request.args.get("tz_offset", 0))
+    local_tz = timezone(timedelta(minutes=tz_offset_minutes))
+
     def fetch_by_day(obj_type, ts_prop):
         payload = {
             "filterGroups": [{"filters": [
@@ -433,7 +437,7 @@ def cameron_trends():
         for r in results:
             ts = r.get("properties", {}).get(ts_prop)
             try:
-                day = datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+                day = datetime.fromtimestamp(int(ts) / 1000, tz=local_tz).strftime("%Y-%m-%d")
                 counts[day] = counts.get(day, 0) + 1
             except Exception:
                 pass
@@ -442,9 +446,10 @@ def cameron_trends():
     call_counts  = fetch_by_day("calls",  "hs_timestamp")
     email_counts = fetch_by_day("emails", "hs_timestamp")
 
+    now_local = now.astimezone(local_tz)
     labels, call_data, email_data = [], [], []
     for i in range(days, -1, -1):
-        day = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        day = (now_local - timedelta(days=i)).strftime("%Y-%m-%d")
         labels.append(day)
         call_data.append(call_counts.get(day, 0))
         email_data.append(email_counts.get(day, 0))
