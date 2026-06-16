@@ -381,5 +381,122 @@ def get_client(client_value):
     return jsonify({"emails": ["", "", ""]})
 
 
+CAMERON_OWNER_ID = "93829264"
+
+def _day_range_ms(date_str):
+    """Return (start_ms, end_ms) for a YYYY-MM-DD date in UTC."""
+    day = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    start_ms = int(day.timestamp() * 1000)
+    end_ms   = int((day + timedelta(days=1)).timestamp() * 1000) - 1
+    return start_ms, end_ms
+
+
+@app.route("/cameron")
+@login_required
+def cameron():
+    return render_template("cameron.html")
+
+
+@app.route("/api/cameron/calls")
+@login_required
+def cameron_calls():
+    date_str = request.args.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    try:
+        start_ms, end_ms = _day_range_ms(date_str)
+    except ValueError:
+        return jsonify({"error": "Invalid date"}), 400
+
+    payload = {
+        "filterGroups": [{"filters": [
+            {"propertyName": "hubspot_owner_id", "operator": "EQ",  "value": CAMERON_OWNER_ID},
+            {"propertyName": "hs_timestamp",     "operator": "GTE", "value": str(start_ms)},
+            {"propertyName": "hs_timestamp",     "operator": "LTE", "value": str(end_ms)},
+        ]}],
+        "properties": [
+            "hs_call_title", "hs_call_duration", "hs_call_status",
+            "hs_call_direction", "hs_timestamp",
+        ],
+        "sorts": [{"propertyName": "hs_timestamp", "direction": "DESCENDING"}],
+        "limit": 100,
+    }
+
+    resp = requests.post(f"{BASE_URL}/crm/v3/objects/calls/search", headers=HEADERS, json=payload)
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    calls = []
+    for r in resp.json().get("results", []):
+        p = r.get("properties", {})
+        ts = p.get("hs_timestamp")
+        try:
+            time_str = datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc).strftime("%-I:%M %p")
+        except Exception:
+            time_str = ""
+
+        dur_ms = p.get("hs_call_duration")
+        try:
+            secs = int(dur_ms) // 1000
+            duration = f"{secs // 60}m {secs % 60}s" if secs >= 60 else f"{secs}s"
+        except Exception:
+            duration = ""
+
+        calls.append({
+            "id":        r["id"],
+            "time":      time_str,
+            "title":     p.get("hs_call_title") or "",
+            "direction": p.get("hs_call_direction") or "",
+            "duration":  duration,
+            "status":    p.get("hs_call_status") or "",
+        })
+
+    return jsonify({"calls": calls, "total": len(calls)})
+
+
+@app.route("/api/cameron/emails")
+@login_required
+def cameron_emails():
+    date_str = request.args.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    try:
+        start_ms, end_ms = _day_range_ms(date_str)
+    except ValueError:
+        return jsonify({"error": "Invalid date"}), 400
+
+    payload = {
+        "filterGroups": [{"filters": [
+            {"propertyName": "hubspot_owner_id", "operator": "EQ",  "value": CAMERON_OWNER_ID},
+            {"propertyName": "hs_timestamp",     "operator": "GTE", "value": str(start_ms)},
+            {"propertyName": "hs_timestamp",     "operator": "LTE", "value": str(end_ms)},
+        ]}],
+        "properties": [
+            "hs_email_subject", "hs_email_direction", "hs_email_status", "hs_timestamp",
+        ],
+        "sorts": [{"propertyName": "hs_timestamp", "direction": "DESCENDING"}],
+        "limit": 100,
+    }
+
+    resp = requests.post(f"{BASE_URL}/crm/v3/objects/emails/search", headers=HEADERS, json=payload)
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    emails = []
+    for r in resp.json().get("results", []):
+        p = r.get("properties", {})
+        ts = p.get("hs_timestamp")
+        try:
+            time_str = datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc).strftime("%-I:%M %p")
+        except Exception:
+            time_str = ""
+
+        emails.append({
+            "id":        r["id"],
+            "time":      time_str,
+            "subject":   p.get("hs_email_subject") or "(No subject)",
+            "direction": p.get("hs_email_direction") or "",
+            "status":    p.get("hs_email_status") or "",
+        })
+
+    return jsonify({"emails": emails, "total": len(emails)})
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5050)

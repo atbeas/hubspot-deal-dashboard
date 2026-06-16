@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cameron Whitmore — Daily Activity</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #f4f5f7; color: #1a1a2e; min-height: 100vh; }
+
+    /* ── Header ── */
+    header {
+      background: #ff5c35; color: #fff;
+      padding: 16px 32px; display: flex; align-items: center; gap: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; }
+    header p  { font-size: .82rem; opacity: .85; margin-top: 1px; }
+    .header-nav { margin-left: auto; display: flex; gap: 10px; }
+    .nav-link {
+      padding: 7px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600;
+      text-decoration: none; color: #fff; background: rgba(255,255,255,.2);
+      transition: background .15s;
+    }
+    .nav-link:hover { background: rgba(255,255,255,.3); }
+
+    /* ── Filter bar ── */
+    .filters {
+      background: #fff; border-bottom: 1px solid #e2e4e9;
+      padding: 14px 32px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    }
+    .filters label { font-size: .78rem; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .4px; }
+    input[type="date"] {
+      border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 11px;
+      font-size: .88rem; font-family: inherit; color: #1a1a2e; outline: none;
+    }
+    input[type="date"]:focus { border-color: #ff5c35; }
+    .btn { padding: 8px 18px; border-radius: 6px; font-size: .88rem; font-weight: 600; cursor: pointer; border: none; transition: background .15s; }
+    .btn-primary { background: #ff5c35; color: #fff; }
+    .btn-primary:hover { background: #e04d2a; }
+
+    /* ── Stats ── */
+    .stats { padding: 20px 32px 0; display: flex; gap: 16px; flex-wrap: wrap; }
+    .stat {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 10px;
+      padding: 14px 24px; text-align: center; min-width: 130px;
+    }
+    .stat .val { font-size: 2rem; font-weight: 700; color: #ff5c35; line-height: 1; }
+    .stat .lbl { font-size: .76rem; color: #6b7280; margin-top: 4px; font-weight: 500; text-transform: uppercase; letter-spacing: .4px; }
+
+    /* ── Main content ── */
+    .content { padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 28px; }
+
+    /* ── Report panels ── */
+    .report {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 12px; overflow: hidden;
+    }
+    .report-header {
+      padding: 14px 20px; border-bottom: 1px solid #e2e4e9;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .report-header h2 { font-size: 1rem; font-weight: 700; color: #1a1a2e; }
+    .count-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: #ff5c35; color: #fff; font-size: .75rem; font-weight: 700;
+      border-radius: 20px; padding: 2px 9px; min-width: 26px;
+    }
+    .count-badge.blue { background: #2563eb; }
+
+    /* ── Table ── */
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      padding: 10px 16px; text-align: left;
+      font-size: .73rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+      color: #6b7280; background: #f9fafb; border-bottom: 1px solid #e2e4e9;
+    }
+    td { padding: 12px 16px; font-size: .87rem; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #fafafa; }
+
+    .time-cell { color: #6b7280; font-size: .82rem; white-space: nowrap; }
+
+    .dir-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 20px;
+      font-size: .72rem; font-weight: 600; white-space: nowrap;
+    }
+    .dir-in  { background: #eff6ff; color: #2563eb; }
+    .dir-out { background: #f0fdf4; color: #059669; }
+    .dir-other { background: #f3f4f6; color: #6b7280; }
+
+    .status-cell { font-size: .82rem; color: #6b7280; }
+    .status-connected { color: #059669; font-weight: 600; }
+    .status-completed { color: #059669; font-weight: 600; }
+    .status-no-answer { color: #d97706; font-weight: 600; }
+    .status-busy      { color: #ef4444; font-weight: 600; }
+
+    .duration-cell { font-size: .85rem; color: #374151; font-weight: 500; }
+    .title-cell { color: #374151; }
+    .subject-cell { color: #374151; font-weight: 500; }
+
+    .empty-row td {
+      text-align: center; padding: 32px 16px; color: #9ca3af; font-size: .9rem;
+    }
+
+    /* loading spinner */
+    .spinner {
+      display: inline-block; width: 18px; height: 18px;
+      border: 2px solid #e5e7eb; border-top-color: #ff5c35;
+      border-radius: 50%; animation: spin .6s linear infinite;
+      vertical-align: middle; margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Cameron Whitmore — Daily Activity</h1>
+    <p>Calls and emails logged in HubSpot</p>
+  </div>
+  <div class="header-nav">
+    <a href="/" class="nav-link">Deal Dashboard</a>
+    <a href="/settings" class="nav-link">⚙ Settings</a>
+    <a href="/logout" class="nav-link">Log Out</a>
+  </div>
+</header>
+
+<div class="filters">
+  <label for="datePicker">Date</label>
+  <input type="date" id="datePicker" />
+  <button class="btn btn-primary" onclick="loadAll()">Load</button>
+</div>
+
+<div class="stats">
+  <div class="stat">
+    <div class="val" id="statCalls">—</div>
+    <div class="lbl">Calls Today</div>
+  </div>
+  <div class="stat">
+    <div class="val" id="statEmails">—</div>
+    <div class="lbl">Emails Today</div>
+  </div>
+</div>
+
+<div class="content">
+
+  <!-- Calls Report -->
+  <div class="report">
+    <div class="report-header">
+      <h2>Calls</h2>
+      <span class="count-badge" id="callsBadge">0</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:80px">Time</th>
+          <th>Title / Description</th>
+          <th style="width:100px">Direction</th>
+          <th style="width:100px">Duration</th>
+          <th style="width:120px">Status</th>
+        </tr>
+      </thead>
+      <tbody id="callsBody">
+        <tr class="empty-row"><td colspan="5">Select a date and click Load.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Emails Report -->
+  <div class="report">
+    <div class="report-header">
+      <h2>Emails</h2>
+      <span class="count-badge blue" id="emailsBadge">0</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:80px">Time</th>
+          <th>Subject</th>
+          <th style="width:110px">Direction</th>
+          <th style="width:120px">Status</th>
+        </tr>
+      </thead>
+      <tbody id="emailsBody">
+        <tr class="empty-row"><td colspan="4">Select a date and click Load.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+  // Default to today in local YYYY-MM-DD
+  const today = new Date();
+  const pad   = n => String(n).padStart(2, '0');
+  const todayStr = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+  document.getElementById('datePicker').value = todayStr;
+
+  function dirBadge(dir) {
+    if (!dir) return '<span class="dir-badge dir-other">—</span>';
+    const d = dir.toUpperCase();
+    if (d === 'INBOUND'  || d === 'EMAIL')       return `<span class="dir-badge dir-in">Inbound</span>`;
+    if (d === 'OUTBOUND' || d === 'REPLY_TO')    return `<span class="dir-badge dir-out">Outbound</span>`;
+    return `<span class="dir-badge dir-other">${dir}</span>`;
+  }
+
+  function callStatusClass(s) {
+    if (!s) return 'status-cell';
+    const u = s.toUpperCase();
+    if (u === 'CONNECTED' || u === 'COMPLETED') return 'status-connected';
+    if (u === 'NO_ANSWER' || u === 'MISSED')    return 'status-no-answer';
+    if (u === 'BUSY')                            return 'status-busy';
+    return 'status-cell';
+  }
+
+  function fmtStatus(s) {
+    if (!s) return '—';
+    return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  async function loadCalls(date) {
+    const body = document.getElementById('callsBody');
+    body.innerHTML = '<tr class="empty-row"><td colspan="5"><span class="spinner"></span>Loading…</td></tr>';
+
+    const resp = await fetch(`/api/cameron/calls?date=${date}`);
+    const data = await resp.json();
+
+    document.getElementById('callsBadge').textContent = data.total ?? 0;
+    document.getElementById('statCalls').textContent  = data.total ?? 0;
+
+    if (!data.calls || data.calls.length === 0) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="5">No calls logged for this date.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = data.calls.map(c => `
+      <tr>
+        <td class="time-cell">${c.time || '—'}</td>
+        <td class="title-cell">${c.title || '<span style="color:#9ca3af">—</span>'}</td>
+        <td>${dirBadge(c.direction)}</td>
+        <td class="duration-cell">${c.duration || '—'}</td>
+        <td class="${callStatusClass(c.status)}">${fmtStatus(c.status)}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function loadEmails(date) {
+    const body = document.getElementById('emailsBody');
+    body.innerHTML = '<tr class="empty-row"><td colspan="4"><span class="spinner"></span>Loading…</td></tr>';
+
+    const resp = await fetch(`/api/cameron/emails?date=${date}`);
+    const data = await resp.json();
+
+    document.getElementById('emailsBadge').textContent = data.total ?? 0;
+    document.getElementById('statEmails').textContent  = data.total ?? 0;
+
+    if (!data.emails || data.emails.length === 0) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="4">No emails logged for this date.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = data.emails.map(e => `
+      <tr>
+        <td class="time-cell">${e.time || '—'}</td>
+        <td class="subject-cell">${e.subject || '(No subject)'}</td>
+        <td>${dirBadge(e.direction)}</td>
+        <td class="status-cell">${fmtStatus(e.status)}</td>
+      </tr>
+    `).join('');
+  }
+
+  function loadAll() {
+    const date = document.getElementById('datePicker').value;
+    if (!date) return;
+    loadCalls(date);
+    loadEmails(date);
+  }
+
+  // Auto-load today on page open
+  loadAll();
+</script>
+</body>
+</html>
