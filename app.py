@@ -437,7 +437,8 @@ def cameron_trends():
         for r in results:
             ts = r.get("properties", {}).get(ts_prop)
             try:
-                day = datetime.fromtimestamp(int(ts) / 1000, tz=local_tz).strftime("%Y-%m-%d")
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                day = dt.astimezone(local_tz).strftime("%Y-%m-%d")
                 counts[day] = counts.get(day, 0) + 1
             except Exception:
                 pass
@@ -489,7 +490,7 @@ def cameron_calls():
         p = r.get("properties", {})
         ts = p.get("hs_timestamp")
         try:
-            time_str = datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc).strftime("%-I:%M %p")
+            time_str = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%-I:%M %p")
         except Exception:
             time_str = ""
 
@@ -543,7 +544,7 @@ def cameron_emails():
         p = r.get("properties", {})
         ts = p.get("hs_timestamp")
         try:
-            time_str = datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc).strftime("%-I:%M %p")
+            time_str = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%-I:%M %p")
         except Exception:
             time_str = ""
 
