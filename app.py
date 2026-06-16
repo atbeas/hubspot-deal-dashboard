@@ -397,6 +397,61 @@ def cameron():
     return render_template("cameron.html")
 
 
+@app.route("/api/cameron/trends")
+@login_required
+def cameron_trends():
+    days = int(request.args.get("days", 30))
+    now = datetime.now(timezone.utc)
+    start_day = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_ms = int(start_day.timestamp() * 1000)
+    end_ms = int(now.timestamp() * 1000)
+
+    def fetch_by_day(obj_type, ts_prop):
+        payload = {
+            "filterGroups": [{"filters": [
+                {"propertyName": "hubspot_owner_id", "operator": "EQ",  "value": CAMERON_OWNER_ID},
+                {"propertyName": ts_prop,            "operator": "GTE", "value": str(start_ms)},
+                {"propertyName": ts_prop,            "operator": "LTE", "value": str(end_ms)},
+            ]}],
+            "properties": [ts_prop],
+            "limit": 200,
+        }
+        results = []
+        after = None
+        while True:
+            if after:
+                payload["after"] = after
+            resp = requests.post(f"{BASE_URL}/crm/v3/objects/{obj_type}/search", headers=HEADERS, json=payload)
+            if not resp.ok:
+                break
+            data = resp.json()
+            results.extend(data.get("results", []))
+            after = data.get("paging", {}).get("next", {}).get("after")
+            if not after or len(results) >= 2000:
+                break
+        counts = {}
+        for r in results:
+            ts = r.get("properties", {}).get(ts_prop)
+            try:
+                day = datetime.fromtimestamp(int(ts) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+                counts[day] = counts.get(day, 0) + 1
+            except Exception:
+                pass
+        return counts
+
+    call_counts  = fetch_by_day("calls",  "hs_timestamp")
+    email_counts = fetch_by_day("emails", "hs_timestamp")
+
+    labels, call_data, email_data = [], [], []
+    for i in range(days, -1, -1):
+        day = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        labels.append(day)
+        call_data.append(call_counts.get(day, 0))
+        email_data.append(email_counts.get(day, 0))
+
+    return jsonify({"labels": labels, "calls": call_data, "emails": email_data})
+
+
 @app.route("/api/cameron/calls")
 @login_required
 def cameron_calls():
