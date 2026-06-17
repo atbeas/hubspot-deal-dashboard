@@ -36,11 +36,10 @@
     .nav-dropdown-btn:hover { background: rgba(255,255,255,.3); }
     .nav-dropdown-btn::after { content: '▾'; font-size: .75rem; }
     .nav-dropdown-menu {
-      display: none; position: absolute; top: calc(100% + 6px); right: 0;
+      display: none; position: absolute; top: 100%; right: 0; margin-top: 4px;
       background: #fff; border: 1px solid #e2e4e9; border-radius: 8px;
       box-shadow: 0 4px 16px rgba(0,0,0,.12); min-width: 160px; overflow: hidden; z-index: 100;
     }
-    .nav-dropdown:hover .nav-dropdown-menu,
     .nav-dropdown.open .nav-dropdown-menu { display: block; }
     .nav-dropdown-menu a {
       display: block; padding: 10px 16px; font-size: .87rem; font-weight: 500;
@@ -175,7 +174,7 @@
   <div class="header-nav">
     <a href="/" class="nav-link">Deal Dashboard</a>
     <div class="nav-dropdown">
-      <button class="nav-dropdown-btn">Sales Dev</button>
+      <button class="nav-dropdown-btn" onclick="toggleSD(event)">Sales Dev</button>
       <div class="nav-dropdown-menu">
         <a href="/cameron" class="active">Cameron Whitmore</a>
         <a href="/roslyn">Roslyn Yee</a>
@@ -542,6 +541,14 @@
   loadTrends();
   // Refresh charts every 2 minutes
   setInterval(loadTrends, 2 * 60 * 1000);
+
+  function toggleSD(e) {
+    e.stopPropagation();
+    document.querySelector('.nav-dropdown').classList.toggle('open');
+  }
+  document.addEventListener('click', () => {
+    document.querySelector('.nav-dropdown')?.classList.remove('open');
+  });
 </script>
 </body>
 </html>
