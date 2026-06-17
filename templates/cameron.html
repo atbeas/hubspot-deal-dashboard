@@ -238,12 +238,11 @@
       <thead>
         <tr>
           <th style="width:80px">Time</th>
-          <th>Contact</th>
-          <th>Notes</th>
+          <th>Message Preview</th>
         </tr>
       </thead>
       <tbody id="linkedinBody">
-        <tr class="empty-row"><td colspan="3">Select a date and click Load.</td></tr>
+        <tr class="empty-row"><td colspan="2">Select a date and click Load.</td></tr>
       </tbody>
     </table>
   </div>
@@ -362,15 +361,14 @@
     document.getElementById('statLinkedIn').textContent  = data.total ?? 0;
 
     if (!data.messages || data.messages.length === 0) {
-      body.innerHTML = '<tr class="empty-row"><td colspan="3">No LinkedIn messages logged for this date.</td></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="2">No LinkedIn messages logged for this date.</td></tr>';
       return;
     }
 
     body.innerHTML = data.messages.map(m => `
       <tr>
         <td class="time-cell">${m.time || '—'}</td>
-        <td class="title-cell">${m.contact || '—'}</td>
-        <td class="status-cell">${m.notes || ''}</td>
+        <td class="title-cell">${m.preview || '—'}</td>
       </tr>
     `).join('');
   }

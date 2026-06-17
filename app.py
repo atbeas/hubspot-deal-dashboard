@@ -382,7 +382,6 @@ def get_client(client_value):
 
 
 CAMERON_OWNER_ID = "93829264"
-CAMERON_LINKEDIN_SUBJECT = "CW Florida Leads"
 
 def _day_range_ms(date_str):
     """Return (start_ms, end_ms) for a YYYY-MM-DD date in UTC."""
@@ -411,13 +410,16 @@ def cameron_trends():
     tz_offset_minutes = int(request.args.get("tz_offset", 0))
     local_tz = timezone(timedelta(minutes=tz_offset_minutes))
 
-    def fetch_by_day(obj_type, ts_prop):
+    def fetch_by_day(obj_type, ts_prop, extra_filters=None):
+        filters = [
+            {"propertyName": "hubspot_owner_id", "operator": "EQ",  "value": CAMERON_OWNER_ID},
+            {"propertyName": ts_prop,            "operator": "GTE", "value": str(start_ms)},
+            {"propertyName": ts_prop,            "operator": "LTE", "value": str(end_ms)},
+        ]
+        if extra_filters:
+            filters.extend(extra_filters)
         payload = {
-            "filterGroups": [{"filters": [
-                {"propertyName": "hubspot_owner_id", "operator": "EQ",  "value": CAMERON_OWNER_ID},
-                {"propertyName": ts_prop,            "operator": "GTE", "value": str(start_ms)},
-                {"propertyName": ts_prop,            "operator": "LTE", "value": str(end_ms)},
-            ]}],
+            "filterGroups": [{"filters": filters}],
             "properties": [ts_prop],
             "limit": 200,
         }
@@ -448,41 +450,10 @@ def cameron_trends():
     call_counts  = fetch_by_day("calls",  "hs_timestamp")
     email_counts = fetch_by_day("emails", "hs_timestamp")
 
-    # LinkedIn: completed "CW Florida Leads" tasks, grouped by completion date
-    linkedin_payload = {
-        "filterGroups": [{"filters": [
-            {"propertyName": "hubspot_owner_id",       "operator": "EQ",  "value": CAMERON_OWNER_ID},
-            {"propertyName": "hs_task_subject",        "operator": "EQ",  "value": CAMERON_LINKEDIN_SUBJECT},
-            {"propertyName": "hs_task_status",         "operator": "EQ",  "value": "COMPLETED"},
-            {"propertyName": "hs_task_completion_date","operator": "GTE", "value": str(start_ms)},
-            {"propertyName": "hs_task_completion_date","operator": "LTE", "value": str(end_ms)},
-        ]}],
-        "properties": ["hs_task_completion_date"],
-        "limit": 200,
-    }
-    li_results = []
-    li_after = None
-    while True:
-        if li_after:
-            linkedin_payload["after"] = li_after
-        li_resp = requests.post(f"{BASE_URL}/crm/v3/objects/tasks/search", headers=HEADERS, json=linkedin_payload)
-        if not li_resp.ok:
-            break
-        li_data = li_resp.json()
-        li_results.extend(li_data.get("results", []))
-        li_after = li_data.get("paging", {}).get("next", {}).get("after")
-        if not li_after or len(li_results) >= 2000:
-            break
-
-    linkedin_counts = {}
-    for r in li_results:
-        ts = r.get("properties", {}).get("hs_task_completion_date")
-        try:
-            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            day = dt.astimezone(local_tz).strftime("%Y-%m-%d")
-            linkedin_counts[day] = linkedin_counts.get(day, 0) + 1
-        except Exception:
-            pass
+    # LinkedIn: native LINKEDIN_MESSAGE communications, grouped by timestamp
+    linkedin_counts = fetch_by_day("communications", "hs_timestamp",
+                                   extra_filters=[{"propertyName": "hs_communication_channel_type",
+                                                   "operator": "EQ", "value": "LINKEDIN_MESSAGE"}])
 
     now_local = now.astimezone(local_tz)
     labels, call_data, email_data, linkedin_data = [], [], [], []
@@ -608,28 +579,27 @@ def cameron_linkedin():
 
     payload = {
         "filterGroups": [{"filters": [
-            {"propertyName": "hubspot_owner_id",        "operator": "EQ",  "value": CAMERON_OWNER_ID},
-            {"propertyName": "hs_task_subject",         "operator": "EQ",  "value": CAMERON_LINKEDIN_SUBJECT},
-            {"propertyName": "hs_task_status",          "operator": "EQ",  "value": "COMPLETED"},
-            {"propertyName": "hs_task_completion_date", "operator": "GTE", "value": str(start_ms)},
-            {"propertyName": "hs_task_completion_date", "operator": "LTE", "value": str(end_ms)},
+            {"propertyName": "hubspot_owner_id",              "operator": "EQ",  "value": CAMERON_OWNER_ID},
+            {"propertyName": "hs_communication_channel_type", "operator": "EQ",  "value": "LINKEDIN_MESSAGE"},
+            {"propertyName": "hs_timestamp",                  "operator": "GTE", "value": str(start_ms)},
+            {"propertyName": "hs_timestamp",                  "operator": "LTE", "value": str(end_ms)},
         ]}],
         "properties": [
-            "hs_task_subject", "hs_task_completion_date",
-            "hs_associated_contact_labels", "hs_task_body",
+            "hs_communication_channel_type", "hs_timestamp",
+            "hs_communication_body", "hs_body_preview",
         ],
-        "sorts": [{"propertyName": "hs_task_completion_date", "direction": "DESCENDING"}],
+        "sorts": [{"propertyName": "hs_timestamp", "direction": "DESCENDING"}],
         "limit": 200,
     }
 
-    resp = requests.post(f"{BASE_URL}/crm/v3/objects/tasks/search", headers=HEADERS, json=payload)
+    resp = requests.post(f"{BASE_URL}/crm/v3/objects/communications/search", headers=HEADERS, json=payload)
     if not resp.ok:
         return jsonify({"error": resp.text}), resp.status_code
 
     messages = []
     for r in resp.json().get("results", []):
         p = r.get("properties", {})
-        ts = p.get("hs_task_completion_date")
+        ts = p.get("hs_timestamp")
         try:
             time_str = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%-I:%M %p")
         except Exception:
@@ -637,8 +607,7 @@ def cameron_linkedin():
         messages.append({
             "id":      r["id"],
             "time":    time_str,
-            "contact": p.get("hs_associated_contact_labels") or "—",
-            "notes":   p.get("hs_task_body") or "",
+            "preview": p.get("hs_body_preview") or p.get("hs_communication_body") or "—",
         })
 
     return jsonify({"messages": messages, "total": len(messages)})
