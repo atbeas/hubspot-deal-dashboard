@@ -613,5 +613,199 @@ def cameron_linkedin():
     return jsonify({"messages": messages, "total": len(messages)})
 
 
+# ── Roslyn Yee dashboard ──────────────────────────────────────────────────────
+
+ROSLYN_OWNER_ID = "88244907"
+
+
+def _roslyn_activity(obj_type, ts_prop, date_str, extra_props=None, extra_filters=None):
+    """Fetch activity records for Roslyn for a given day."""
+    start_ms, end_ms = _day_range_ms(date_str)
+    filters = [
+        {"propertyName": "hubspot_owner_id", "operator": "EQ",  "value": ROSLYN_OWNER_ID},
+        {"propertyName": ts_prop,            "operator": "GTE", "value": str(start_ms)},
+        {"propertyName": ts_prop,            "operator": "LTE", "value": str(end_ms)},
+    ]
+    if extra_filters:
+        filters.extend(extra_filters)
+    payload = {
+        "filterGroups": [{"filters": filters}],
+        "properties": [ts_prop] + (extra_props or []),
+        "sorts": [{"propertyName": ts_prop, "direction": "DESCENDING"}],
+        "limit": 200,
+    }
+    resp = requests.post(f"{BASE_URL}/crm/v3/objects/{obj_type}/search", headers=HEADERS, json=payload)
+    return resp
+
+
+@app.route("/roslyn")
+@login_required
+def roslyn():
+    return render_template("roslyn.html")
+
+
+@app.route("/api/roslyn/calls")
+@login_required
+def roslyn_calls():
+    date_str = request.args.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    try:
+        resp = _roslyn_activity("calls", "hs_timestamp", date_str,
+                                extra_props=["hs_call_title", "hs_call_duration", "hs_call_status", "hs_call_direction"])
+    except ValueError:
+        return jsonify({"error": "Invalid date"}), 400
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    calls = []
+    for r in resp.json().get("results", []):
+        p = r.get("properties", {})
+        ts = p.get("hs_timestamp")
+        try:
+            time_str = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%-I:%M %p")
+        except Exception:
+            time_str = ""
+        dur_ms = p.get("hs_call_duration")
+        try:
+            secs = int(dur_ms) // 1000
+            duration = f"{secs // 60}m {secs % 60}s" if secs >= 60 else f"{secs}s"
+        except Exception:
+            duration = ""
+        calls.append({
+            "id": r["id"], "time": time_str,
+            "title": p.get("hs_call_title") or "",
+            "direction": p.get("hs_call_direction") or "",
+            "duration": duration,
+            "status": p.get("hs_call_status") or "",
+        })
+    return jsonify({"calls": calls, "total": len(calls)})
+
+
+@app.route("/api/roslyn/emails")
+@login_required
+def roslyn_emails():
+    date_str = request.args.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    try:
+        resp = _roslyn_activity("emails", "hs_timestamp", date_str,
+                                extra_props=["hs_email_subject", "hs_email_direction", "hs_email_status"])
+    except ValueError:
+        return jsonify({"error": "Invalid date"}), 400
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    emails = []
+    for r in resp.json().get("results", []):
+        p = r.get("properties", {})
+        ts = p.get("hs_timestamp")
+        try:
+            time_str = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%-I:%M %p")
+        except Exception:
+            time_str = ""
+        emails.append({
+            "id": r["id"], "time": time_str,
+            "subject": p.get("hs_email_subject") or "(No subject)",
+            "direction": p.get("hs_email_direction") or "",
+            "status": p.get("hs_email_status") or "",
+        })
+    return jsonify({"emails": emails, "total": len(emails)})
+
+
+@app.route("/api/roslyn/linkedin")
+@login_required
+def roslyn_linkedin():
+    date_str = request.args.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    try:
+        resp = _roslyn_activity(
+            "communications", "hs_timestamp", date_str,
+            extra_props=["hs_communication_channel_type", "hs_communication_body", "hs_body_preview"],
+            extra_filters=[{"propertyName": "hs_communication_channel_type",
+                            "operator": "EQ", "value": "LINKEDIN_MESSAGE"}],
+        )
+    except ValueError:
+        return jsonify({"error": "Invalid date"}), 400
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    messages = []
+    for r in resp.json().get("results", []):
+        p = r.get("properties", {})
+        ts = p.get("hs_timestamp")
+        try:
+            time_str = datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%-I:%M %p")
+        except Exception:
+            time_str = ""
+        messages.append({
+            "id": r["id"], "time": time_str,
+            "preview": p.get("hs_body_preview") or p.get("hs_communication_body") or "—",
+        })
+    return jsonify({"messages": messages, "total": len(messages)})
+
+
+@app.route("/api/roslyn/trends")
+@login_required
+def roslyn_trends():
+    days = int(request.args.get("days", 30))
+    now = datetime.now(timezone.utc)
+    start_day = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_ms = int(start_day.timestamp() * 1000)
+    end_ms = int(now.timestamp() * 1000)
+
+    tz_offset_minutes = int(request.args.get("tz_offset", 0))
+    local_tz = timezone(timedelta(minutes=tz_offset_minutes))
+
+    def fetch_by_day(obj_type, ts_prop, extra_filters=None):
+        filters = [
+            {"propertyName": "hubspot_owner_id", "operator": "EQ",  "value": ROSLYN_OWNER_ID},
+            {"propertyName": ts_prop,            "operator": "GTE", "value": str(start_ms)},
+            {"propertyName": ts_prop,            "operator": "LTE", "value": str(end_ms)},
+        ]
+        if extra_filters:
+            filters.extend(extra_filters)
+        payload = {
+            "filterGroups": [{"filters": filters}],
+            "properties": [ts_prop],
+            "limit": 200,
+        }
+        results = []
+        after = None
+        while True:
+            if after:
+                payload["after"] = after
+            resp = requests.post(f"{BASE_URL}/crm/v3/objects/{obj_type}/search", headers=HEADERS, json=payload)
+            if not resp.ok:
+                break
+            data = resp.json()
+            results.extend(data.get("results", []))
+            after = data.get("paging", {}).get("next", {}).get("after")
+            if not after or len(results) >= 2000:
+                break
+        counts = {}
+        for r in results:
+            ts = r.get("properties", {}).get(ts_prop)
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                day = dt.astimezone(local_tz).strftime("%Y-%m-%d")
+                counts[day] = counts.get(day, 0) + 1
+            except Exception:
+                pass
+        return counts
+
+    call_counts    = fetch_by_day("calls",          "hs_timestamp")
+    email_counts   = fetch_by_day("emails",         "hs_timestamp")
+    linkedin_counts = fetch_by_day("communications", "hs_timestamp",
+                                   extra_filters=[{"propertyName": "hs_communication_channel_type",
+                                                   "operator": "EQ", "value": "LINKEDIN_MESSAGE"}])
+
+    now_local = now.astimezone(local_tz)
+    labels, call_data, email_data, linkedin_data = [], [], [], []
+    for i in range(days, -1, -1):
+        day = (now_local - timedelta(days=i)).strftime("%Y-%m-%d")
+        labels.append(day)
+        call_data.append(call_counts.get(day, 0))
+        email_data.append(email_counts.get(day, 0))
+        linkedin_data.append(linkedin_counts.get(day, 0))
+
+    return jsonify({"labels": labels, "calls": call_data, "emails": email_data, "linkedin": linkedin_data})
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5050)

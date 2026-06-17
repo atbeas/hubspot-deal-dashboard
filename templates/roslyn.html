@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cameron Whitmore — Daily Activity</title>
+  <title>Roslyn Yee — Daily Activity</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <style>
@@ -146,12 +146,12 @@
 
 <header>
   <div>
-    <h1>Cameron Whitmore — Daily Activity</h1>
+    <h1>Roslyn Yee — Daily Activity</h1>
     <p>Calls and emails logged in HubSpot</p>
   </div>
   <div class="header-nav">
     <a href="/" class="nav-link">Deal Dashboard</a>
-    <a href="/roslyn" class="nav-link">Roslyn</a>
+    <a href="/cameron" class="nav-link">Cameron</a>
     <a href="/settings" class="nav-link">⚙ Settings</a>
     <a href="/logout" class="nav-link">Log Out</a>
   </div>
@@ -185,7 +185,7 @@
       <span class="chart-updated">Updated <span id="callsUpdatedAt">—</span></span>
       <button class="refresh-btn" title="Refresh" onclick="loadTrends()">↻</button>
     </div>
-    <canvas id="callsTrendChart"></canvas>
+    <canvas id="callsTrendChartR"></canvas>
   </div>
   <div class="chart-card">
     <div class="chart-card-header">
@@ -193,7 +193,7 @@
       <span class="chart-updated">Updated <span id="emailsUpdatedAt">—</span></span>
       <button class="refresh-btn" title="Refresh" onclick="loadTrends()">↻</button>
     </div>
-    <canvas id="emailsTrendChart"></canvas>
+    <canvas id="emailsTrendChartR"></canvas>
   </div>
   <div class="chart-card">
     <div class="chart-card-header">
@@ -201,7 +201,7 @@
       <span class="chart-updated">Updated <span id="linkedinUpdatedAt">—</span></span>
       <button class="refresh-btn" title="Refresh" onclick="loadTrends()">↻</button>
     </div>
-    <canvas id="linkedinTrendChart"></canvas>
+    <canvas id="linkedinTrendChartR"></canvas>
   </div>
 </div>
 
@@ -304,7 +304,7 @@
     const body = document.getElementById('callsBody');
     body.innerHTML = '<tr class="empty-row"><td colspan="5"><span class="spinner"></span>Loading…</td></tr>';
 
-    const resp = await fetch(`/api/cameron/calls?date=${date}`);
+    const resp = await fetch(`/api/roslyn/calls?date=${date}`);
     const data = await resp.json();
 
     document.getElementById('callsBadge').textContent = data.total ?? 0;
@@ -330,7 +330,7 @@
     const body = document.getElementById('emailsBody');
     body.innerHTML = '<tr class="empty-row"><td colspan="4"><span class="spinner"></span>Loading…</td></tr>';
 
-    const resp = await fetch(`/api/cameron/emails?date=${date}`);
+    const resp = await fetch(`/api/roslyn/emails?date=${date}`);
     const data = await resp.json();
 
     document.getElementById('emailsBadge').textContent = data.total ?? 0;
@@ -355,7 +355,7 @@
     const body = document.getElementById('linkedinBody');
     body.innerHTML = '<tr class="empty-row"><td colspan="3"><span class="spinner"></span>Loading…</td></tr>';
 
-    const resp = await fetch(`/api/cameron/linkedin?date=${date}`);
+    const resp = await fetch(`/api/roslyn/linkedin?date=${date}`);
     const data = await resp.json();
 
     document.getElementById('linkedinBadge').textContent = data.total ?? 0;
@@ -428,7 +428,7 @@
   }
 
   async function loadTrends() {
-    const resp = await fetch(`/api/cameron/trends?days=30&tz_offset=${tzOffset}`);
+    const resp = await fetch(`/api/roslyn/trends?days=30&tz_offset=${tzOffset}`);
     if (!resp.ok) return;
     const data = await resp.json();
 
@@ -442,7 +442,7 @@
       callsChart.data.datasets[0].data = data.calls;
       callsChart.update();
     } else {
-      callsChart = new Chart(document.getElementById('callsTrendChart'), {
+      callsChart = new Chart(document.getElementById('callsTrendChartR'), {
         type: 'line',
         data: {
           labels: data.labels,
@@ -466,7 +466,7 @@
       emailsChart.data.datasets[0].data = data.emails;
       emailsChart.update();
     } else {
-      emailsChart = new Chart(document.getElementById('emailsTrendChart'), {
+      emailsChart = new Chart(document.getElementById('emailsTrendChartR'), {
         type: 'line',
         data: {
           labels: data.labels,
@@ -490,7 +490,7 @@
       linkedinChart.data.datasets[0].data = data.linkedin;
       linkedinChart.update();
     } else {
-      linkedinChart = new Chart(document.getElementById('linkedinTrendChart'), {
+      linkedinChart = new Chart(document.getElementById('linkedinTrendChartR'), {
         type: 'line',
         data: {
           labels: data.labels,
