@@ -864,36 +864,42 @@
           </div>
         </div>
         <div class="card-right">
-          <span class="step-label">Step 3 (review SD Notes)</span>
-          <div class="note-block">
-            <span class="notes-label">Deal Notes <span>· business_needs</span></span>
-            <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
-                      id="needs-${d.id}"
-                      data-deal="${d.id}"
-                      placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
-                      oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
-          </div>
-          <span class="step-label">Step 4 (edit the meeting notes for the client)</span>
-          <div class="note-block">
-            <span class="notes-label">Client-Facing Notes <span>· will be emailed to client</span></span>
-            <textarea class="needs-input ${cfnHasValue ? 'has-value' : ''}"
-                      id="cfn-${d.id}"
-                      data-deal="${d.id}"
-                      placeholder="Edit the notes above into client-friendly language before sending."
-                      oninput="markNeedsDirty(this)">${esc(d.client_facing_notes)}</textarea>
-            <div class="notes-footer">
-              <button class="btn-submit ${notesStatusCls}" id="notesbtn-${d.id}"
-                      onclick="submitNotes('${d.id}')">
-                ${d.client_facing_notes ? '✓ Saved' : 'Save Notes'}
-              </button>
+          <div class="step-box">
+            <span class="step-label">Step 3 (review SD Notes)</span>
+            <div class="note-block">
+              <span class="notes-label">Deal Notes <span>· business_needs</span></span>
+              <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
+                        id="needs-${d.id}"
+                        data-deal="${d.id}"
+                        placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
+                        oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
             </div>
           </div>
-          <span class="step-label">Step 5 (send prep notes to client)</span>
-          <div class="notes-footer">
-            <button class="btn-invite ${sentCls}" id="sendemail-${d.id}"
-                    onclick="openSendEmailModal('${d.id}')">
-              ${d.prep_email_sent ? '✓ Sent' : 'Send Prep Email'}
-            </button>
+          <div class="step-box">
+            <span class="step-label">Step 4 (edit the meeting notes for the client)</span>
+            <div class="note-block">
+              <span class="notes-label">Client-Facing Notes <span>· will be emailed to client</span></span>
+              <textarea class="needs-input ${cfnHasValue ? 'has-value' : ''}"
+                        id="cfn-${d.id}"
+                        data-deal="${d.id}"
+                        placeholder="Edit the notes above into client-friendly language before sending."
+                        oninput="markNeedsDirty(this)">${esc(d.client_facing_notes)}</textarea>
+              <div class="notes-footer">
+                <button class="btn-submit ${notesStatusCls}" id="notesbtn-${d.id}"
+                        onclick="submitNotes('${d.id}')">
+                  ${d.client_facing_notes ? '✓ Saved' : 'Save Notes'}
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="step-box">
+            <span class="step-label">Step 5 (send prep notes to client)</span>
+            <div class="notes-footer">
+              <button class="btn-invite ${sentCls}" id="sendemail-${d.id}"
+                      onclick="openSendEmailModal('${d.id}')">
+                ${d.prep_email_sent ? '✓ Sent' : 'Send Prep Email'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
