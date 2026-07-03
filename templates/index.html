@@ -572,11 +572,12 @@
     document.getElementById('cardsWrap').innerHTML = allDeals.map(d => cardHtml(d)).join('');
   }
 
-  function ownerOptions(selectedId) {
+  function ownerOptions(selectedId, showEmail) {
     const none = `<option value="">— Select —</option>`;
-    return none + allOwners.map(o =>
-      `<option value="${esc(o.id)}" ${o.id === selectedId ? 'selected' : ''}>${esc(o.name)}</option>`
-    ).join('');
+    return none + allOwners.map(o => {
+      const label = showEmail && o.email ? `${o.name} (${o.email})` : o.name;
+      return `<option value="${esc(o.id)}" ${o.id === selectedId ? 'selected' : ''}>${esc(label)}</option>`;
+    }).join('');
   }
 
   function clientOptions(selectedValue) {
@@ -593,7 +594,7 @@
 
     const dropdowns = ROLE_KEYS.map(k => {
       const meta = ROLE_META[k];
-      const opts = meta.type === 'enum' ? clientOptions(d[k]) : ownerOptions(d[k]);
+      const opts = meta.type === 'enum' ? clientOptions(d[k]) : ownerOptions(d[k], k === 'am' || k === 'se');
       return `
         <div class="role-group">
           <span class="role-label ${meta.cls}">${meta.label}</span>
