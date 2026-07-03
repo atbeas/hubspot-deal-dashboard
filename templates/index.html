@@ -112,6 +112,15 @@
     }
     .card-left { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
+    .step-box {
+      border: 1px solid #2a2d3e; border-radius: 8px;
+      padding: 14px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .step-label {
+      font-size: .7rem; font-weight: 800; text-transform: uppercase;
+      letter-spacing: .6px; color: #ff5c35;
+    }
+
     .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .role-group { display: flex; flex-direction: column; gap: 5px; }
     .role-label { font-size: .73rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #8b8fa8; }
@@ -622,14 +631,17 @@
       </div>
       <div class="card-main">
         <div class="card-left">
-          <div class="role-grid">
-            ${dropdowns}
-          </div>
-          <div class="left-footer">
-            <button class="btn-submit ${statusCls}" id="btn-${d.id}"
-                    onclick="submitDeal('${d.id}')">
-              ${allFilled ? '✓ Saved' : 'Submit'}
-            </button>
+          <div class="step-box">
+            <span class="step-label">Step 1</span>
+            <div class="role-grid">
+              ${dropdowns}
+            </div>
+            <div class="left-footer">
+              <button class="btn-submit ${statusCls}" id="btn-${d.id}"
+                      onclick="submitDeal('${d.id}')">
+                ${allFilled ? '✓ Saved' : 'Submit'}
+              </button>
+            </div>
           </div>
           <div class="meeting-row">
             <div class="meeting-group" id="meetinggroup-${d.id}">
