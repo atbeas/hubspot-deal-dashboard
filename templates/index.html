@@ -641,7 +641,8 @@
     ccEmails.forEach(e => addChip(ccContainer, e));
     document.getElementById('emailExtraTo').value = '';
     document.getElementById('emailExtraCc').value = '';
-    document.getElementById('emailModalSubject').value = `Runway Selling Meeting Notes | ${deal.name} | ${clientLabel}`;
+    const prospectCompany = (deal.name || '').split('|')[0].trim();
+    document.getElementById('emailModalSubject').value = `Runway Selling Meeting Notes | ${prospectCompany} | ${clientLabel}`;
     document.getElementById('emailModalBody').value = `${template}\n\n${notes}`;
 
     _pendingEmail = { dealId, btn: document.getElementById(`sendemail-${dealId}`) };
