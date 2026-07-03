@@ -63,7 +63,7 @@ def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not session.get("authenticated"):
-            return redirect(url_for("login"))
+            return redirect(url_for("login", next=request.path))
         return f(*args, **kwargs)
     return decorated
 
@@ -82,12 +82,13 @@ OWNER_ROLES = {"sd", "am", "se"}
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
+    next_url = request.values.get("next") or url_for("index")
     if request.method == "POST":
         if request.form.get("password") == APP_PASSWORD:
             session["authenticated"] = True
-            return redirect(url_for("index"))
+            return redirect(next_url)
         error = "Incorrect password."
-    return render_template("login.html", error=error)
+    return render_template("login.html", error=error, next=next_url)
 
 @app.route("/logout")
 def logout():
@@ -288,6 +289,65 @@ def update_deal(deal_id):
         return jsonify({"error": resp.text}), resp.status_code
 
     return jsonify({"ok": True})
+
+
+@app.route("/quick-notes")
+@login_required
+def quick_notes():
+    return render_template("quick_notes.html")
+
+
+# Deals created by the "10talent" meeting link (Scheduling @ 10talent Tech
+# Business Discovery (Z)) are uniquely fingerprinted by this owner + SD combo,
+# set as static values in Workflow 1's Action 57.
+QUICK_NOTES_OWNER_ID = "89539474"
+QUICK_NOTES_SD_ID    = "84551230"
+
+
+@app.route("/api/quick-notes")
+@login_required
+def get_quick_notes():
+    hours = int(request.args.get("hours", 6))
+    since_ms = int((datetime.now(timezone.utc) - timedelta(hours=hours)).timestamp() * 1000)
+
+    payload = {
+        "filterGroups": [{
+            "filters": [
+                {"propertyName": "createdate", "operator": "GTE", "value": str(since_ms)},
+                {"propertyName": "pipeline", "operator": "EQ", "value": "default"},
+                {"propertyName": "hubspot_owner_id", "operator": "EQ", "value": QUICK_NOTES_OWNER_ID},
+                {"propertyName": "sales_development__new_", "operator": "EQ", "value": QUICK_NOTES_SD_ID},
+            ]
+        }],
+        "properties": ["dealname", "createdate", "business_needs"],
+        "sorts": [{"propertyName": "createdate", "direction": "DESCENDING"}],
+        "limit": 25,
+    }
+
+    resp = requests.post(f"{BASE_URL}/crm/v3/objects/deals/search", headers=HEADERS, json=payload)
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    now = datetime.now(timezone.utc)
+    deals = []
+    for result in resp.json().get("results", []):
+        props = result.get("properties", {})
+        created_dt = datetime.fromisoformat(props["createdate"].replace("Z", "+00:00"))
+        minutes_ago = int((now - created_dt).total_seconds() // 60)
+        if minutes_ago < 60:
+            created_label = f"{minutes_ago} min ago" if minutes_ago != 1 else "1 min ago"
+        else:
+            hours_ago = minutes_ago // 60
+            created_label = f"{hours_ago} hr ago" if hours_ago == 1 else f"{hours_ago} hrs ago"
+
+        deals.append({
+            "id": result["id"],
+            "name": props.get("dealname") or "(No name)",
+            "created_label": created_label,
+            "business_needs": props.get("business_needs") or "",
+        })
+
+    return jsonify({"deals": deals})
 
 
 @app.route("/api/meetings")

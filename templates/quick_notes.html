@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meeting Notes</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #0f1117; color: #e8e9f0; min-height: 100vh; }
+
+    header {
+      background: #0d0e1a; padding: 18px 20px;
+      border-bottom: 1px solid #2a2d3e; display: flex; align-items: center; gap: 12px;
+    }
+    .header-logo { font-size: .7rem; font-weight: 800; color: #ff5c35; letter-spacing: .5px; text-transform: uppercase; }
+    header h1 { font-size: 1.05rem; font-weight: 700; flex: 1; }
+    .refresh-btn {
+      background: rgba(255,255,255,.08); border: 1px solid #2a2d3e; color: #c9cad8;
+      border-radius: 6px; padding: 8px 14px; font-size: .82rem; font-weight: 600;
+      font-family: inherit; cursor: pointer;
+    }
+    .refresh-btn:active { background: rgba(255,255,255,.16); }
+
+    main { padding: 16px; max-width: 560px; margin: 0 auto; }
+
+    .hint {
+      font-size: .82rem; color: #8b8fa8; padding: 4px 2px 16px; line-height: 1.4;
+    }
+
+    .empty {
+      text-align: center; color: #8b8fa8; font-size: .9rem; padding: 60px 20px;
+    }
+
+    .card {
+      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 12px;
+      padding: 16px; margin-bottom: 14px;
+    }
+    .card-top {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 10px; margin-bottom: 10px;
+    }
+    .deal-name { font-weight: 700; font-size: 1rem; color: #e8e9f0; }
+    .time-ago { font-size: .78rem; color: #8b8fa8; white-space: nowrap; }
+
+    textarea {
+      width: 100%; min-height: 100px; border: 1px solid #2a2d3e; border-radius: 8px;
+      padding: 12px; font-size: .95rem; font-family: inherit; color: #e8e9f0;
+      background: #252839; outline: none; resize: vertical; line-height: 1.5;
+    }
+    textarea:focus { border-color: #ff5c35; box-shadow: 0 0 0 3px rgba(255,92,53,.15); }
+
+    .card-footer { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+    .save-btn {
+      flex: 1; padding: 12px; border-radius: 8px; border: none;
+      background: #ff5c35; color: #fff; font-weight: 700; font-size: .92rem;
+      font-family: inherit; cursor: pointer; transition: background .15s;
+    }
+    .save-btn:active { background: #e04d2a; }
+    .save-btn.saved { background: #22c55e; }
+    .save-status { font-size: .78rem; color: #22c55e; font-weight: 600; opacity: 0; transition: opacity .2s; }
+    .save-status.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="header-logo">10TALENT TECH</div>
+      <h1>Meeting Notes</h1>
+    </div>
+    <button class="refresh-btn" onclick="load()">Refresh</button>
+  </header>
+
+  <main>
+    <div class="hint">Just booked a meeting? Give it a minute or two to appear, then add your notes below — they save straight to the deal's Business Needs field.</div>
+    <div id="list"></div>
+  </main>
+
+  <script>
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s || '';
+      return d.innerHTML;
+    }
+
+    async function load() {
+      const list = document.getElementById('list');
+      list.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const resp = await fetch('/api/quick-notes');
+        const data = await resp.json();
+        const deals = data.deals || [];
+        if (!deals.length) {
+          list.innerHTML = '<div class="empty">No recent meetings yet. Tap Refresh once your deal is created.</div>';
+          return;
+        }
+        list.innerHTML = deals.map(d => `
+          <div class="card" data-id="${d.id}">
+            <div class="card-top">
+              <div class="deal-name">${esc(d.name)}</div>
+              <div class="time-ago">${esc(d.created_label)}</div>
+            </div>
+            <textarea placeholder="What does the prospect need? Add notes from the call...">${esc(d.business_needs)}</textarea>
+            <div class="card-footer">
+              <button class="save-btn" onclick="save(this)">Save Notes</button>
+              <span class="save-status">Saved</span>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) {
+        list.innerHTML = '<div class="empty">Failed to load. Tap Refresh to try again.</div>';
+      }
+    }
+
+    async function save(btn) {
+      const card = btn.closest('.card');
+      const dealId = card.dataset.id;
+      const textarea = card.querySelector('textarea');
+      const status = card.querySelector('.save-status');
+      btn.textContent = 'Saving…';
+      btn.classList.remove('saved');
+      status.classList.remove('show');
+      try {
+        const resp = await fetch(`/api/deals/${dealId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ business_needs: textarea.value }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        btn.textContent = 'Save Notes';
+        btn.classList.add('saved');
+        status.classList.add('show');
+        setTimeout(() => btn.classList.remove('saved'), 1500);
+      } catch (e) {
+        btn.textContent = 'Save Notes';
+        alert('Failed to save — ' + e.message);
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>
