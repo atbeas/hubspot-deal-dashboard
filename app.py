@@ -342,7 +342,7 @@ def get_quick_notes(company):
     if not cfg:
         return jsonify({"error": "Unknown company"}), 404
 
-    hours = int(request.args.get("hours", 36))
+    hours = int(request.args.get("hours", 168))
     since_ms = int((datetime.now(timezone.utc) - timedelta(hours=hours)).timestamp() * 1000)
 
     payload = {
@@ -371,9 +371,12 @@ def get_quick_notes(company):
         minutes_ago = int((now - created_dt).total_seconds() // 60)
         if minutes_ago < 60:
             created_label = f"{minutes_ago} min ago" if minutes_ago != 1 else "1 min ago"
-        else:
+        elif minutes_ago < 1440:
             hours_ago = minutes_ago // 60
             created_label = f"{hours_ago} hr ago" if hours_ago == 1 else f"{hours_ago} hrs ago"
+        else:
+            days_ago = minutes_ago // 1440
+            created_label = f"{days_ago} day ago" if days_ago == 1 else f"{days_ago} days ago"
 
         deals.append({
             "id": result["id"],
