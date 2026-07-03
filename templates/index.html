@@ -456,7 +456,8 @@
     const allEmails = [...new Set([...teamEmails, ...clientEmails])];
     if (!allEmails.length) return showToast('Assign at least SD, AM, or SE first', true);
 
-    _pendingInvite = { dealId, eventId, btn: document.getElementById(`invite-${dealId}`) };
+    const meetingLabel = document.getElementById(`meetingtext-${dealId}`).textContent;
+    _pendingInvite = { dealId, eventId, meetingLabel, btn: document.getElementById(`invite-${dealId}`) };
     openModal(allEmails);
   }
 
@@ -493,7 +494,7 @@
 
   async function confirmInvite() {
     if (!_pendingInvite) return;
-    const { dealId, eventId, btn } = _pendingInvite;
+    const { dealId, eventId, meetingLabel, btn } = _pendingInvite;
     const emails = Array.from(document.getElementById('modalAttendees').querySelectorAll('[data-email]'))
       .map(c => c.dataset.email);
     if (!emails.length) return showToast('No attendees selected', true);
@@ -509,6 +510,16 @@
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Failed');
+
+      fetch(`/api/deals/${dealId}/meeting`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ meeting_id: eventId, meeting_label: meetingLabel }),
+      }).catch(() => {});
+
+      const deal = allDeals.find(d => d.id === dealId);
+      if (deal) { deal.meeting_id = eventId; deal.meeting_label = meetingLabel; }
+
       closeModal();
       btn.textContent = '✓ Added';
       btn.classList.add('invited');
@@ -649,9 +660,9 @@
             <div class="meeting-row">
               <div class="meeting-group" id="meetinggroup-${d.id}">
                 <span class="meeting-label">Add Team to Calendar Invite</span>
-                <button type="button" class="meeting-trigger" id="meetingtrigger-${d.id}"
+                <button type="button" class="meeting-trigger ${d.meeting_id ? 'has-value' : ''}" id="meetingtrigger-${d.id}"
                         onclick="toggleMeetingDropdown('${d.id}')">
-                  <span class="trigger-text" id="meetingtext-${d.id}">— Select meeting —</span>
+                  <span class="trigger-text" id="meetingtext-${d.id}">${d.meeting_label ? esc(d.meeting_label) : '— Select meeting —'}</span>
                   <span class="trigger-arrow">▼</span>
                 </button>
                 <div class="meeting-dropdown" id="meetingdrop-${d.id}">
@@ -669,7 +680,7 @@
                     }
                   </div>
                 </div>
-                <input type="hidden" id="meeting-${d.id}" value="" />
+                <input type="hidden" id="meeting-${d.id}" value="${d.meeting_id ? esc(d.meeting_id) : ''}" />
               </div>
               <button class="btn-invite" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
                 Add to Invite

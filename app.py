@@ -45,6 +45,13 @@ def init_db():
                 submitted_at TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS deal_meeting (
+                deal_id TEXT PRIMARY KEY,
+                meeting_id TEXT NOT NULL,
+                meeting_label TEXT NOT NULL
+            )
+        """)
 
 init_db()
 
@@ -238,6 +245,12 @@ def get_owner_eligibility():
     return {r["owner_id"]: {"am": bool(r["eligible_am"]), "se": bool(r["eligible_se"])} for r in rows}
 
 
+def get_deal_meetings():
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM deal_meeting").fetchall()
+    return {r["deal_id"]: {"id": r["meeting_id"], "label": r["meeting_label"]} for r in rows}
+
+
 @app.route("/api/owners")
 @login_required
 def get_owners():
@@ -308,6 +321,7 @@ def get_deals():
 
     data = resp.json()
     owner_cache = {}
+    deal_meetings = get_deal_meetings()
 
     def resolve_owner(owner_id):
         if not owner_id:
@@ -338,6 +352,8 @@ def get_deals():
         except Exception:
             pass
 
+        meeting = deal_meetings.get(result["id"], {})
+
         deals.append({
             "id":      result["id"],
             "name":    props.get("dealname") or "(No name)",
@@ -352,6 +368,8 @@ def get_deals():
             "se":            props.get(ROLE_PROPS["se"])     or "",
             "business_needs": props.get("business_needs")   or "",
             "client_facing_notes": props.get("client_facing_notes") or "",
+            "meeting_id":    meeting.get("id", ""),
+            "meeting_label": meeting.get("label", ""),
         })
 
     return jsonify({"deals": deals, "total": data.get("total", 0)})
@@ -619,6 +637,25 @@ def add_meeting_attendees(event_id):
         return jsonify({"error": patch.text}), patch.status_code
 
     return jsonify({"ok": True, "added": len(emails)})
+
+
+@app.route("/api/deals/<deal_id>/meeting", methods=["POST"])
+@login_required
+def set_deal_meeting(deal_id):
+    body = request.get_json()
+    meeting_id    = body.get("meeting_id", "")
+    meeting_label = body.get("meeting_label", "")
+    if not meeting_id:
+        return jsonify({"error": "meeting_id required"}), 400
+
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO deal_meeting (deal_id, meeting_id, meeting_label)
+            VALUES (?, ?, ?)
+            ON CONFLICT(deal_id) DO UPDATE SET meeting_id = excluded.meeting_id,
+                                                meeting_label = excluded.meeting_label
+        """, [deal_id, meeting_id, meeting_label])
+    return jsonify({"ok": True})
 
 
 @app.route("/settings")
