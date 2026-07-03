@@ -731,6 +731,7 @@ def send_prep_email(deal_id):
         "subject": subject,
         "body": {"contentType": "Text", "content": content},
         "toRecipients": [{"emailAddress": {"address": e}} for e in to],
+        "bccRecipients": [{"emailAddress": {"address": PREP_EMAIL_FROM}}],
     }
     if cc:
         message["ccRecipients"] = [{"emailAddress": {"address": e}} for e in cc]
