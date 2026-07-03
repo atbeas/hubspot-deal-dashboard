@@ -194,6 +194,7 @@
     .btn-invite:hover  { background: #1d4ed8; }
     .btn-invite:disabled { opacity: .5; cursor: not-allowed; }
     .btn-invite.invited { background: #22c55e; }
+    .btn-invite.sent { background: #22c55e; }
 
     /* ── Notes (right column) ── */
     .card-right {
@@ -319,6 +320,47 @@
               style="padding:9px 20px; border-radius:7px; border:1px solid #2a2d3e; background:#252839; color:#c9cad8; font-size:.88rem; font-weight:600; cursor:pointer;">Cancel</button>
       <button id="modalConfirmBtn" onclick="confirmInvite()"
               style="padding:9px 20px; border-radius:7px; border:none; background:#2563eb; color:#fff; font-size:.88rem; font-weight:600; cursor:pointer;">Confirm & Add to Invite</button>
+    </div>
+  </div>
+</div>
+
+<!-- Send prep email confirmation modal -->
+<div id="emailModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:200; align-items:center; justify-content:center;">
+  <div style="background:#1e2030; border:1px solid #2a2d3e; border-radius:14px; padding:28px 32px; max-width:560px; width:92%; max-height:88vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,.6);">
+    <h2 style="font-size:1rem; font-weight:700; margin-bottom:6px; color:#e8e9f0;">Send Meeting Prep Notes</h2>
+    <p style="font-size:.83rem; color:#8b8fa8; margin-bottom:18px;">Review recipients and content before sending — this goes straight to the client's inbox.</p>
+
+    <label style="font-size:.73rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#8b8fa8;">To (Client)</label>
+    <div id="emailModalTo" style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 10px;"></div>
+    <div style="display:flex; gap:8px; margin-bottom:16px;">
+      <input id="emailExtraTo" type="email" placeholder="Add another email…"
+             style="flex:1; padding:7px 10px; border:1px solid #2a2d3e; border-radius:6px; font-size:.86rem; font-family:inherit; outline:none; background:#252839; color:#e8e9f0;" />
+      <button onclick="emailModalAddExtra('to')"
+              style="padding:7px 14px; border-radius:6px; border:1px solid #2a2d3e; background:#252839; color:#c9cad8; font-size:.86rem; font-weight:600; cursor:pointer;">Add</button>
+    </div>
+
+    <label style="font-size:.73rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#8b8fa8;">CC (Account Manager / Sales Executive)</label>
+    <div id="emailModalCc" style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 10px;"></div>
+    <div style="display:flex; gap:8px; margin-bottom:16px;">
+      <input id="emailExtraCc" type="email" placeholder="Add another email…"
+             style="flex:1; padding:7px 10px; border:1px solid #2a2d3e; border-radius:6px; font-size:.86rem; font-family:inherit; outline:none; background:#252839; color:#e8e9f0;" />
+      <button onclick="emailModalAddExtra('cc')"
+              style="padding:7px 14px; border-radius:6px; border:1px solid #2a2d3e; background:#252839; color:#c9cad8; font-size:.86rem; font-weight:600; cursor:pointer;">Add</button>
+    </div>
+
+    <label style="font-size:.73rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#8b8fa8;">Subject</label>
+    <input id="emailModalSubject" type="text"
+           style="width:100%; padding:8px 10px; margin:8px 0 16px; border:1px solid #2a2d3e; border-radius:6px; font-size:.86rem; font-family:inherit; outline:none; background:#252839; color:#e8e9f0;" />
+
+    <label style="font-size:.73rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#8b8fa8;">Message</label>
+    <textarea id="emailModalBody" rows="8"
+              style="width:100%; padding:10px; margin:8px 0 18px; border:1px solid #2a2d3e; border-radius:6px; font-size:.86rem; font-family:inherit; outline:none; background:#252839; color:#e8e9f0; resize:vertical;"></textarea>
+
+    <div style="display:flex; gap:10px; justify-content:flex-end;">
+      <button onclick="closeEmailModal()"
+              style="padding:9px 20px; border-radius:7px; border:1px solid #2a2d3e; background:#252839; color:#c9cad8; font-size:.88rem; font-weight:600; cursor:pointer;">Cancel</button>
+      <button id="emailModalSendBtn" onclick="confirmSendEmail()"
+              style="padding:9px 20px; border-radius:7px; border:none; background:#2563eb; color:#fff; font-size:.88rem; font-weight:600; cursor:pointer;">Send Email</button>
     </div>
   </div>
 </div>
@@ -544,6 +586,128 @@
     if (e.target === document.getElementById('inviteModal')) closeModal();
   });
 
+  let _pendingEmail = null; // { dealId, btn }
+  let _emailTemplateCache = null;
+
+  async function getEmailTemplate() {
+    if (_emailTemplateCache !== null) return _emailTemplateCache;
+    try {
+      const r = await fetch('/api/settings/email-template');
+      const d = await r.json();
+      _emailTemplateCache = d.template || '';
+    } catch (e) { _emailTemplateCache = ''; }
+    return _emailTemplateCache;
+  }
+
+  async function openSendEmailModal(dealId) {
+    const deal = allDeals.find(d => d.id === dealId);
+    if (!deal) return;
+
+    const cfnTextarea = document.getElementById(`cfn-${dealId}`);
+    if (cfnTextarea && cfnTextarea.classList.contains('dirty')) {
+      return showToast('Save your notes first', true);
+    }
+    const notes = (cfnTextarea ? cfnTextarea.value : deal.client_facing_notes || '').trim();
+    if (!notes) return showToast('Add client-facing notes first', true);
+
+    const card = document.getElementById(`card-${dealId}`);
+    const selects = card.querySelectorAll('select.role-select');
+    const roles = {};
+    selects.forEach(s => { roles[s.dataset.role] = s.value; });
+
+    const clientValue = roles['client'] || '';
+    let clientEmails = [];
+    if (clientValue) {
+      try {
+        const r = await fetch(`/api/clients/${encodeURIComponent(clientValue)}`);
+        const d = await r.json();
+        clientEmails = (d.emails || []).filter(Boolean);
+      } catch (e) { /* ignore */ }
+    }
+    if (!clientEmails.length) return showToast('No client email on file — add one in Settings', true);
+
+    const ccEmails = ['am', 'se']
+      .map(role => allOwners.find(o => o.id === roles[role])?.email)
+      .filter(Boolean);
+
+    const template = await getEmailTemplate();
+    const clientLabel = CLIENT_OPTIONS.find(o => o.value === clientValue)?.label || deal.name;
+
+    const toContainer = document.getElementById('emailModalTo');
+    const ccContainer = document.getElementById('emailModalCc');
+    toContainer.innerHTML = '';
+    clientEmails.forEach(e => addChip(toContainer, e));
+    ccContainer.innerHTML = '';
+    ccEmails.forEach(e => addChip(ccContainer, e));
+    document.getElementById('emailExtraTo').value = '';
+    document.getElementById('emailExtraCc').value = '';
+    document.getElementById('emailModalSubject').value = `Meeting Prep Notes — ${clientLabel}`;
+    document.getElementById('emailModalBody').value = `${template}\n\n${notes}`;
+
+    _pendingEmail = { dealId, btn: document.getElementById(`sendemail-${dealId}`) };
+    document.getElementById('emailModal').style.display = 'flex';
+  }
+
+  function emailModalAddExtra(target) {
+    const inputId     = target === 'to' ? 'emailExtraTo' : 'emailExtraCc';
+    const containerId = target === 'to' ? 'emailModalTo' : 'emailModalCc';
+    const input = document.getElementById(inputId);
+    const email = input.value.trim();
+    if (!email) return;
+    const container = document.getElementById(containerId);
+    const exists = Array.from(container.querySelectorAll('[data-email]')).some(c => c.dataset.email === email);
+    if (!exists) addChip(container, email);
+    input.value = '';
+  }
+
+  function closeEmailModal() {
+    document.getElementById('emailModal').style.display = 'none';
+    _pendingEmail = null;
+  }
+
+  async function confirmSendEmail() {
+    if (!_pendingEmail) return;
+    const { dealId, btn } = _pendingEmail;
+    const to = Array.from(document.getElementById('emailModalTo').querySelectorAll('[data-email]')).map(c => c.dataset.email);
+    const cc = Array.from(document.getElementById('emailModalCc').querySelectorAll('[data-email]')).map(c => c.dataset.email);
+    const subject = document.getElementById('emailModalSubject').value.trim();
+    const body = document.getElementById('emailModalBody').value;
+    if (!to.length) return showToast('At least one To recipient required', true);
+    if (!subject) return showToast('Subject required', true);
+
+    const sendBtn = document.getElementById('emailModalSendBtn');
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending…';
+
+    try {
+      const resp = await fetch(`/api/deals/${dealId}/send-prep-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, cc, subject, body }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Failed');
+
+      const deal = allDeals.find(d => d.id === dealId);
+      if (deal) deal.prep_email_sent = true;
+
+      closeEmailModal();
+      btn.textContent = '✓ Sent';
+      btn.classList.add('sent');
+      showToast('Prep email sent to client');
+    } catch (e) {
+      showToast('Failed to send — ' + e.message, true);
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send Email';
+    }
+  }
+
+  // Close modal on backdrop click
+  document.getElementById('emailModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('emailModal')) closeEmailModal();
+  });
+
   function resetFilters() {
     const t = new Date(), w = new Date();
     w.setMonth(t.getMonth() - 2);
@@ -621,6 +785,7 @@
     const statusCls = allFilled ? 'saved' : '';
     const inviteStatusCls = d.meeting_id ? 'invited' : '';
     const notesStatusCls = d.client_facing_notes ? 'saved' : '';
+    const sentCls = d.prep_email_sent ? 'sent' : '';
 
     const dropdowns = ROLE_KEYS.map(k => {
       const meta = ROLE_META[k];
@@ -721,6 +886,13 @@
                 ${d.client_facing_notes ? '✓ Saved' : 'Save Notes'}
               </button>
             </div>
+          </div>
+          <span class="step-label">Step 5 (send prep notes to client)</span>
+          <div class="notes-footer">
+            <button class="btn-invite ${sentCls}" id="sendemail-${d.id}"
+                    onclick="openSendEmailModal('${d.id}')">
+              ${d.prep_email_sent ? '✓ Sent' : 'Send Prep Email'}
+            </button>
           </div>
         </div>
       </div>

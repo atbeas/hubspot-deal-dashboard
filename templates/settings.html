@@ -99,6 +99,15 @@
     .col-check { text-align: center; }
     .col-check input[type=checkbox] { width: 17px; height: 17px; cursor: pointer; accent-color: #ff5c35; }
 
+    .email-template-input {
+      width: 100%; min-height: 140px; padding: 12px 14px; border: 1px solid #d1d5db;
+      border-radius: 8px; font-size: .86rem; font-family: inherit; color: #1a1a2e;
+      outline: none; resize: vertical; transition: border-color .2s, background .2s;
+    }
+    .email-template-input:focus { border-color: #ff5c35; }
+    .email-template-input.dirty { border-color: #fcd34d; background: #fffbeb; }
+    .template-footer { display: flex; justify-content: flex-end; margin-top: 10px; }
+
     #toast {
       position: fixed; bottom: 24px; right: 24px;
       background: #1a1a2e; color: #fff; padding: 11px 18px;
@@ -191,6 +200,17 @@
     </div>
     {% endfor %}
   </div>
+
+  <div class="page-header section-gap">
+    <h2>Prep Email Template</h2>
+    <p>This intro text is prepended to the Client-Facing Notes when sending the "Send Prep Email" from a deal card. It can still be edited per-email before sending.</p>
+  </div>
+
+  <textarea id="emailTemplateInput" class="email-template-input"
+            oninput="markTemplateDirty()">{{ email_template }}</textarea>
+  <div class="template-footer">
+    <button class="btn-save" id="templateSaveBtn" onclick="saveEmailTemplate()">Save</button>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -261,6 +281,38 @@
       showToast('Failed to save', true);
     } finally {
       checkbox.disabled = false;
+    }
+  }
+
+  function markTemplateDirty() {
+    const input = document.getElementById('emailTemplateInput');
+    input.classList.add('dirty');
+    const btn = document.getElementById('templateSaveBtn');
+    btn.textContent = 'Save';
+    btn.classList.remove('saved');
+  }
+
+  async function saveEmailTemplate() {
+    const input = document.getElementById('emailTemplateInput');
+    const btn = document.getElementById('templateSaveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const resp = await fetch('/api/settings/email-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template: input.value }),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      input.classList.remove('dirty');
+      btn.textContent = '✓ Saved';
+      btn.classList.add('saved');
+      btn.disabled = false;
+      showToast('Email template saved');
+    } catch (e) {
+      btn.textContent = 'Save';
+      btn.disabled = false;
+      showToast('Failed to save', true);
     }
   }
 
