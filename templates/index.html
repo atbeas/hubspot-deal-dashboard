@@ -198,6 +198,7 @@
       letter-spacing: .5px; color: #8b8fa8;
     }
     .notes-label span { font-weight: 400; text-transform: none; letter-spacing: 0; color: #5c607a; font-size: .72rem; margin-left: 6px; }
+    .notes-footer { display: flex; justify-content: flex-end; }
     textarea.needs-input {
       width: 100%; flex: 1; border: 1px solid #2a2d3e; border-radius: 7px;
       padding: 9px 12px; font-size: .88rem; font-family: inherit;
@@ -676,6 +677,12 @@
                       data-deal="${d.id}"
                       placeholder="Edit the notes above into client-friendly language before sending."
                       oninput="markNeedsDirty(this)">${esc(d.client_facing_notes)}</textarea>
+            <div class="notes-footer">
+              <button class="btn-submit" id="notesbtn-${d.id}"
+                      onclick="submitNotes('${d.id}')">
+                Save Notes
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -694,8 +701,8 @@
   function markNeedsDirty(textarea) {
     textarea.classList.remove('has-value');
     textarea.classList.add('dirty');
-    const btn = document.getElementById(`btn-${textarea.dataset.deal}`);
-    btn.textContent = 'Submit';
+    const btn = document.getElementById(`notesbtn-${textarea.dataset.deal}`);
+    btn.textContent = 'Save Notes';
     btn.classList.remove('saved');
     btn.disabled = false;
   }
@@ -703,14 +710,10 @@
   async function submitDeal(dealId) {
     const card = document.getElementById(`card-${dealId}`);
     const selects  = card.querySelectorAll('select.role-select');
-    const textarea = document.getElementById(`needs-${dealId}`);
-    const cfnTextarea = document.getElementById(`cfn-${dealId}`);
     const btn = document.getElementById(`btn-${dealId}`);
 
     const payload = {};
     selects.forEach(s => { payload[s.dataset.role] = s.value; });
-    if (textarea) payload.business_needs = textarea.value;
-    if (cfnTextarea) payload.client_facing_notes = cfnTextarea.value;
 
     btn.disabled = true;
     btn.textContent = 'Saving…';
@@ -733,6 +736,44 @@
         s.classList.remove('dirty');
         s.classList.toggle('has-value', !!s.value);
       });
+      btn.textContent = '✓ Saved';
+      btn.classList.add('saved');
+      btn.disabled = false;
+      updateStats();
+      showToast('Deal updated in HubSpot');
+    } catch(e) {
+      btn.textContent = 'Submit';
+      btn.disabled = false;
+      showToast('Failed to save — ' + e.message, true);
+    }
+  }
+
+  async function submitNotes(dealId) {
+    const textarea    = document.getElementById(`needs-${dealId}`);
+    const cfnTextarea  = document.getElementById(`cfn-${dealId}`);
+    const btn = document.getElementById(`notesbtn-${dealId}`);
+
+    const payload = {};
+    if (textarea) payload.business_needs = textarea.value;
+    if (cfnTextarea) payload.client_facing_notes = cfnTextarea.value;
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      const resp = await fetch(`/api/deals/${dealId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Save failed');
+
+      // Update local state
+      const deal = allDeals.find(d => d.id === dealId);
+      if (deal) Object.assign(deal, payload);
+
+      // Update UI
       if (textarea) {
         textarea.classList.remove('dirty');
         textarea.classList.toggle('has-value', !!textarea.value);
@@ -744,12 +785,11 @@
       btn.textContent = '✓ Saved';
       btn.classList.add('saved');
       btn.disabled = false;
-      updateStats();
-      showToast('Deal updated in HubSpot');
+      showToast('Notes updated in HubSpot');
     } catch(e) {
-      btn.textContent = 'Submit';
+      btn.textContent = 'Save Notes';
       btn.disabled = false;
-      showToast('Failed to save — ' + e.message, true);
+      showToast('Failed to save notes — ' + e.message, true);
     }
   }
 
