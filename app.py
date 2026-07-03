@@ -5,6 +5,7 @@ import requests
 from functools import wraps
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from datetime import datetime, timezone, timedelta
+from werkzeug.security import generate_password_hash, check_password_hash
 
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", os.path.dirname(__file__)), "client_contacts.db")
 
@@ -29,6 +30,12 @@ def init_db():
                 owner_id TEXT PRIMARY KEY,
                 eligible_am INTEGER DEFAULT 1,
                 eligible_se INTEGER DEFAULT 1
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS company_passwords (
+                company_key TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL
             )
         """)
 
@@ -60,12 +67,62 @@ BASE_URL = "https://api.hubapi.com"
 HEADERS = {"Authorization": f"Bearer {HUBSPOT_API_KEY}", "Content-Type": "application/json"}
 
 def login_required(f):
+    """Admin-only: the main dashboard password."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not session.get("authenticated"):
+        if session.get("scope") != "admin":
             return redirect(url_for("login", next=request.path))
         return f(*args, **kwargs)
     return decorated
+
+
+def quick_notes_login_required(f):
+    """Admin OR that specific company's own password can access."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        company = kwargs.get("company")
+        scope = session.get("scope")
+        if scope == "admin" or scope == f"company:{company}":
+            return f(*args, **kwargs)
+        return redirect(url_for("login", next=request.path))
+    return decorated
+
+
+def any_login_required(f):
+    """Admin OR any company session can access (shared write endpoint)."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        scope = session.get("scope")
+        if scope == "admin" or (scope and scope.startswith("company:")):
+            return f(*args, **kwargs)
+        return redirect(url_for("login", next=request.path))
+    return decorated
+
+
+def get_company_password_hash(company):
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT password_hash FROM company_passwords WHERE company_key = ?", [company]
+        ).fetchone()
+    return row["password_hash"] if row else None
+
+
+def check_company_password(company, password):
+    stored_hash = get_company_password_hash(company)
+    if stored_hash:
+        return check_password_hash(stored_hash, password)
+    # No custom password set yet — fall back to the main dashboard password
+    return password == APP_PASSWORD
+
+
+def set_company_password(company, password):
+    password_hash = generate_password_hash(password)
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO company_passwords (company_key, password_hash)
+            VALUES (?, ?)
+            ON CONFLICT(company_key) DO UPDATE SET password_hash = excluded.password_hash
+        """, [company, password_hash])
 
 # Real HubSpot deal property names
 ROLE_PROPS = {
@@ -83,10 +140,23 @@ OWNER_ROLES = {"sd", "am", "se"}
 def login():
     error = None
     next_url = request.values.get("next") or url_for("index")
+    locked_company = _locked_company_for_host()
     if request.method == "POST":
-        if request.form.get("password") == APP_PASSWORD:
-            session["authenticated"] = True
-            return redirect(next_url)
+        password = request.form.get("password", "")
+        if locked_company:
+            if check_company_password(locked_company, password):
+                session["scope"] = f"company:{locked_company}"
+                return redirect(next_url)
+        else:
+            if password == APP_PASSWORD:
+                session["scope"] = "admin"
+                return redirect(next_url)
+            # Also allow a company password to log straight into its own
+            # quick-notes page even from the main domain.
+            for key in QUICK_NOTES_COMPANIES:
+                if get_company_password_hash(key) and check_company_password(key, password):
+                    session["scope"] = f"company:{key}"
+                    return redirect(url_for("quick_notes", company=key))
         error = "Incorrect password."
     return render_template("login.html", error=error, next=next_url)
 
@@ -281,7 +351,7 @@ def get_deals():
 
 
 @app.route("/api/deals/<deal_id>", methods=["PATCH"])
-@login_required
+@any_login_required
 def update_deal(deal_id):
     body = request.get_json()
     properties = {}
@@ -335,7 +405,7 @@ def _locked_company_for_host():
 
 
 @app.route("/quick-notes/<company>")
-@login_required
+@quick_notes_login_required
 def quick_notes(company):
     locked = _locked_company_for_host()
     if locked and locked != company:
@@ -348,7 +418,7 @@ def quick_notes(company):
 
 
 @app.route("/api/quick-notes/<company>")
-@login_required
+@quick_notes_login_required
 def get_quick_notes(company):
     locked = _locked_company_for_host()
     if locked and locked != company:
@@ -402,6 +472,32 @@ def get_quick_notes(company):
         })
 
     return jsonify({"deals": deals})
+
+
+@app.route("/admin")
+@login_required
+def admin():
+    companies = []
+    for key, cfg in QUICK_NOTES_COMPANIES.items():
+        companies.append({
+            "key": key,
+            "label": cfg["label"],
+            "has_custom_password": get_company_password_hash(key) is not None,
+        })
+    return render_template("admin.html", companies=companies)
+
+
+@app.route("/api/admin/companies/<company>/password", methods=["POST"])
+@login_required
+def set_company_password_route(company):
+    if company not in QUICK_NOTES_COMPANIES:
+        return jsonify({"error": "Unknown company"}), 404
+    body = request.get_json() or {}
+    password = (body.get("password") or "").strip()
+    if len(password) < 4:
+        return jsonify({"error": "Password must be at least 4 characters"}), 400
+    set_company_password(company, password)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/meetings")

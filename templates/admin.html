@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — Deal Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #f4f5f7; color: #1a1a2e; min-height: 100vh; }
+
+    header {
+      background: #ff5c35; color: #fff;
+      padding: 16px 32px; display: flex; align-items: center; gap: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; }
+    header p  { font-size: .82rem; opacity: .85; margin-top: 1px; }
+    .header-nav { margin-left: auto; display: flex; gap: 10px; }
+    .nav-link {
+      padding: 7px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600;
+      text-decoration: none; color: #fff; background: rgba(255,255,255,.2);
+      transition: background .15s;
+    }
+    .nav-link:hover { background: rgba(255,255,255,.3); }
+
+    .page-wrap { max-width: 720px; margin: 32px auto; padding: 0 24px 60px; }
+
+    .page-header { margin-bottom: 24px; }
+    .page-header h2 { font-size: 1.1rem; font-weight: 700; color: #1a1a2e; }
+    .page-header p  { font-size: .85rem; color: #6b7280; margin-top: 4px; }
+
+    .company-card {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 12px;
+      padding: 20px 22px; margin-bottom: 16px;
+    }
+    .company-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .company-name { font-size: 1rem; font-weight: 700; color: #1a1a2e; }
+    .status-badge {
+      font-size: .72rem; font-weight: 700; padding: 3px 9px; border-radius: 20px;
+      text-transform: uppercase; letter-spacing: .3px;
+    }
+    .status-badge.custom { background: #dcfce7; color: #15803d; }
+    .status-badge.default { background: #fef3c7; color: #92400e; }
+
+    .pw-row { display: flex; gap: 10px; }
+    input.pw-input {
+      flex: 1; padding: 9px 14px; border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: .9rem; font-family: inherit; outline: none; transition: border-color .2s;
+    }
+    input.pw-input:focus { border-color: #ff5c35; }
+
+    .btn-save {
+      padding: 9px 18px; border-radius: 8px; font-size: .85rem; font-weight: 600;
+      cursor: pointer; border: none; background: #ff5c35; color: #fff;
+      transition: background .15s, opacity .15s; white-space: nowrap;
+    }
+    .btn-save:hover { background: #e04d2a; }
+    .btn-save:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-save.saved { background: #059669; }
+
+    .hint { font-size: .78rem; color: #9ca3af; margin-top: 8px; }
+
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: #1a1a2e; color: #fff; padding: 11px 18px;
+      border-radius: 8px; font-size: .86rem; font-weight: 500;
+      opacity: 0; transform: translateY(8px);
+      transition: opacity .2s, transform .2s; pointer-events: none; z-index: 999;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.error { background: #dc2626; }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="rgba(255,255,255,.2)"/>
+    <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>Admin</h1>
+    <p>Manage passwords for the outsourced quick-notes pages</p>
+  </div>
+  <div class="header-nav">
+    <a href="/" class="nav-link">← Dashboard</a>
+    <a href="/logout" class="nav-link">Log Out</a>
+  </div>
+</header>
+
+<div class="page-wrap">
+  <div class="page-header">
+    <h2>Quick Notes Company Passwords</h2>
+    <p>Each company gets its own password to sign into its quick-notes page. Setting a password here replaces the shared dashboard password for that company only — it does not grant access to this admin page or the main dashboard.</p>
+  </div>
+
+  {% for c in companies %}
+  <div class="company-card" id="card-{{ c.key }}">
+    <div class="company-top">
+      <div class="company-name">{{ c.label }}</div>
+      {% if c.has_custom_password %}
+      <div class="status-badge custom">Custom password set</div>
+      {% else %}
+      <div class="status-badge default">Using shared dashboard password</div>
+      {% endif %}
+    </div>
+    <div class="pw-row">
+      <input class="pw-input" type="text" placeholder="New password for {{ c.label }}"
+             id="pw-{{ c.key }}" />
+      <button class="btn-save" id="savebtn-{{ c.key }}" onclick="savePassword('{{ c.key }}', this)">Save</button>
+    </div>
+    <div class="hint">Minimum 4 characters. This is shown in plain text once — write it down before saving.</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div id="toast"></div>
+
+<script>
+  async function savePassword(key, btn) {
+    const input = document.getElementById(`pw-${key}`);
+    const password = input.value.trim();
+    if (password.length < 4) {
+      showToast('Password must be at least 4 characters', true);
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const resp = await fetch(`/api/admin/companies/${encodeURIComponent(key)}/password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      btn.textContent = '✓ Saved';
+      btn.classList.add('saved');
+      input.value = '';
+      const card = document.getElementById(`card-${key}`);
+      const badge = card.querySelector('.status-badge');
+      badge.textContent = 'Custom password set';
+      badge.className = 'status-badge custom';
+      showToast(`Password updated`);
+      setTimeout(() => { btn.textContent = 'Save'; btn.classList.remove('saved'); btn.disabled = false; }, 1500);
+    } catch (e) {
+      btn.textContent = 'Save';
+      btn.disabled = false;
+      showToast('Failed to save', true);
+    }
+  }
+
+  let toastTimer;
+  function showToast(msg, isError = false) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'show' + (isError ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.className = '', 3000);
+  }
+</script>
+</body>
+</html>
