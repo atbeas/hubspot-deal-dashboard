@@ -95,9 +95,22 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+# Custom domains that should land directly on a company's quick-notes page
+# instead of the full dashboard.
+QUICK_NOTES_HOST_MAP = {
+    "zap.runwayselling.app": "zap",
+    "biz.runwayselling.app": "biznatron",
+}
+
+
 @app.route("/")
 @login_required
 def index():
+    host = request.host.split(":")[0].lower()
+    company = QUICK_NOTES_HOST_MAP.get(host)
+    if company:
+        return redirect(url_for("quick_notes", company=company))
+
     # Fetch rs_partner enum options
     client_options = []
     resp = requests.get(
