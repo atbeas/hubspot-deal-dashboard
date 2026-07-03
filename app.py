@@ -326,9 +326,21 @@ QUICK_NOTES_COMPANIES = {
 }
 
 
+def _locked_company_for_host():
+    """If this request came in on a company-specific custom domain, that
+    domain's company is the ONLY one it's allowed to view — regardless of
+    what company slug is in the URL path."""
+    host = request.host.split(":")[0].lower()
+    return QUICK_NOTES_HOST_MAP.get(host)
+
+
 @app.route("/quick-notes/<company>")
 @login_required
 def quick_notes(company):
+    locked = _locked_company_for_host()
+    if locked and locked != company:
+        return redirect(url_for("quick_notes", company=locked))
+
     cfg = QUICK_NOTES_COMPANIES.get(company)
     if not cfg:
         return "Unknown company", 404
@@ -338,6 +350,10 @@ def quick_notes(company):
 @app.route("/api/quick-notes/<company>")
 @login_required
 def get_quick_notes(company):
+    locked = _locked_company_for_host()
+    if locked and locked != company:
+        return jsonify({"error": "This domain is only allowed to view its own company"}), 403
+
     cfg = QUICK_NOTES_COMPANIES.get(company)
     if not cfg:
         return jsonify({"error": "Unknown company"}), 404
