@@ -188,9 +188,11 @@
 
     /* ── Notes (right column) ── */
     .card-right {
-      display: flex; flex-direction: column; gap: 6px;
+      display: flex; flex-direction: column; gap: 14px;
       border-left: 1px solid #252839; padding-left: 24px;
     }
+    .note-block { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; }
+    .note-block + .note-block { border-top: 1px solid #252839; padding-top: 14px; }
     .notes-label {
       font-size: .73rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: .5px; color: #8b8fa8;
@@ -201,7 +203,7 @@
       padding: 9px 12px; font-size: .88rem; font-family: inherit;
       color: #e8e9f0; resize: vertical; background: #252839;
       outline: none; transition: border-color .2s, box-shadow .2s;
-      line-height: 1.5; min-height: 110px;
+      line-height: 1.5; min-height: 80px;
     }
     textarea.needs-input:focus { border-color: #ff5c35; box-shadow: 0 0 0 3px rgba(255,92,53,.15); }
     textarea.needs-input.dirty     { background: rgba(251,191,36,.06); border-color: #fbbf24; }
@@ -604,6 +606,7 @@
     }).join('');
 
     const needsHasValue = !!d.business_needs;
+    const cfnHasValue   = !!d.client_facing_notes;
 
     return `
     <div class="card" id="card-${d.id}">
@@ -658,12 +661,22 @@
           </div>
         </div>
         <div class="card-right">
-          <span class="notes-label">Deal Notes <span>· business_needs</span></span>
-          <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
-                    id="needs-${d.id}"
-                    data-deal="${d.id}"
-                    placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
-                    oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
+          <div class="note-block">
+            <span class="notes-label">Deal Notes <span>· business_needs</span></span>
+            <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
+                      id="needs-${d.id}"
+                      data-deal="${d.id}"
+                      placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
+                      oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
+          </div>
+          <div class="note-block">
+            <span class="notes-label">Client-Facing Notes <span>· will be emailed to client</span></span>
+            <textarea class="needs-input ${cfnHasValue ? 'has-value' : ''}"
+                      id="cfn-${d.id}"
+                      data-deal="${d.id}"
+                      placeholder="Edit the notes above into client-friendly language before sending."
+                      oninput="markNeedsDirty(this)">${esc(d.client_facing_notes)}</textarea>
+          </div>
         </div>
       </div>
     </div>`;
@@ -691,11 +704,13 @@
     const card = document.getElementById(`card-${dealId}`);
     const selects  = card.querySelectorAll('select.role-select');
     const textarea = document.getElementById(`needs-${dealId}`);
+    const cfnTextarea = document.getElementById(`cfn-${dealId}`);
     const btn = document.getElementById(`btn-${dealId}`);
 
     const payload = {};
     selects.forEach(s => { payload[s.dataset.role] = s.value; });
     if (textarea) payload.business_needs = textarea.value;
+    if (cfnTextarea) payload.client_facing_notes = cfnTextarea.value;
 
     btn.disabled = true;
     btn.textContent = 'Saving…';
@@ -721,6 +736,10 @@
       if (textarea) {
         textarea.classList.remove('dirty');
         textarea.classList.toggle('has-value', !!textarea.value);
+      }
+      if (cfnTextarea) {
+        cfnTextarea.classList.remove('dirty');
+        cfnTextarea.classList.toggle('has-value', !!cfnTextarea.value);
       }
       btn.textContent = '✓ Saved';
       btn.classList.add('saved');

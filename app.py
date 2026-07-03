@@ -192,7 +192,7 @@ def get_deals():
 
     properties = [
         "dealname", "createdate", "dealstage", "pipeline", "amount", "hubspot_owner_id",
-        "business_needs",
+        "business_needs", "client_facing_notes",
     ] + list(ROLE_PROPS.values())
 
     filters = [
@@ -261,6 +261,7 @@ def get_deals():
             "am":            props.get(ROLE_PROPS["am"])     or "",
             "se":            props.get(ROLE_PROPS["se"])     or "",
             "business_needs": props.get("business_needs")   or "",
+            "client_facing_notes": props.get("client_facing_notes") or "",
         })
 
     return jsonify({"deals": deals, "total": data.get("total", 0)})
@@ -276,6 +277,8 @@ def update_deal(deal_id):
             properties[prop_name] = body[key]
     if "business_needs" in body:
         properties["business_needs"] = body["business_needs"]
+    if "client_facing_notes" in body:
+        properties["client_facing_notes"] = body["client_facing_notes"]
 
     if not properties:
         return jsonify({"error": "No properties to update"}), 400
