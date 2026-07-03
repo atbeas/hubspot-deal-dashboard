@@ -291,23 +291,42 @@ def update_deal(deal_id):
     return jsonify({"ok": True})
 
 
-@app.route("/quick-notes")
+# Each outsourced appointment-setting company books through its own dedicated
+# meeting link / Workflow 1 branch. Deals from each branch are uniquely
+# fingerprinted by this owner + sales-dev-owner combo (static values set in
+# the branch's deal-creation action) — that's how we scope each company to
+# only their own bookings.
+QUICK_NOTES_COMPANIES = {
+    "zap": {
+        "label": "ZAP",
+        "owner_id": "89539474",
+        "sd_id": "84551230",
+    },
+    "biznatron": {
+        "label": "Biznatron",
+        "owner_id": "89539474",
+        "sd_id": "91889388",
+    },
+}
+
+
+@app.route("/quick-notes/<company>")
 @login_required
-def quick_notes():
-    return render_template("quick_notes.html")
+def quick_notes(company):
+    cfg = QUICK_NOTES_COMPANIES.get(company)
+    if not cfg:
+        return "Unknown company", 404
+    return render_template("quick_notes.html", company=company, company_label=cfg["label"])
 
 
-# Deals created by the "10talent" meeting link (Scheduling @ 10talent Tech
-# Business Discovery (Z)) are uniquely fingerprinted by this owner + SD combo,
-# set as static values in Workflow 1's Action 57.
-QUICK_NOTES_OWNER_ID = "89539474"
-QUICK_NOTES_SD_ID    = "84551230"
-
-
-@app.route("/api/quick-notes")
+@app.route("/api/quick-notes/<company>")
 @login_required
-def get_quick_notes():
-    hours = int(request.args.get("hours", 6))
+def get_quick_notes(company):
+    cfg = QUICK_NOTES_COMPANIES.get(company)
+    if not cfg:
+        return jsonify({"error": "Unknown company"}), 404
+
+    hours = int(request.args.get("hours", 24))
     since_ms = int((datetime.now(timezone.utc) - timedelta(hours=hours)).timestamp() * 1000)
 
     payload = {
@@ -315,8 +334,8 @@ def get_quick_notes():
             "filters": [
                 {"propertyName": "createdate", "operator": "GTE", "value": str(since_ms)},
                 {"propertyName": "pipeline", "operator": "EQ", "value": "default"},
-                {"propertyName": "hubspot_owner_id", "operator": "EQ", "value": QUICK_NOTES_OWNER_ID},
-                {"propertyName": "sales_development__new_", "operator": "EQ", "value": QUICK_NOTES_SD_ID},
+                {"propertyName": "hubspot_owner_id", "operator": "EQ", "value": cfg["owner_id"]},
+                {"propertyName": "sales_development__new_", "operator": "EQ", "value": cfg["sd_id"]},
             ]
         }],
         "properties": ["dealname", "createdate", "business_needs"],
