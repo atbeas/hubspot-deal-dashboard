@@ -29,9 +29,14 @@ def init_db():
             CREATE TABLE IF NOT EXISTS owner_eligibility (
                 owner_id TEXT PRIMARY KEY,
                 eligible_am INTEGER DEFAULT 1,
-                eligible_se INTEGER DEFAULT 1
+                eligible_se INTEGER DEFAULT 1,
+                eligible_sd INTEGER DEFAULT 1
             )
         """)
+        try:
+            conn.execute("ALTER TABLE owner_eligibility ADD COLUMN eligible_sd INTEGER DEFAULT 1")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS company_passwords (
                 company_key TEXT PRIMARY KEY,
@@ -272,7 +277,10 @@ def fetch_hubspot_owners():
 def get_owner_eligibility():
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM owner_eligibility").fetchall()
-    return {r["owner_id"]: {"am": bool(r["eligible_am"]), "se": bool(r["eligible_se"])} for r in rows}
+    return {
+        r["owner_id"]: {"am": bool(r["eligible_am"]), "se": bool(r["eligible_se"]), "sd": bool(r["eligible_sd"])}
+        for r in rows
+    }
 
 
 def get_deal_meetings():
@@ -293,10 +301,14 @@ def get_owners():
     owners = fetch_hubspot_owners()
     eligibility = get_owner_eligibility()
     for o in owners:
-        e = eligibility.get(o["id"], {"am": True, "se": True})
+        e = eligibility.get(o["id"], {"am": True, "se": True, "sd": True})
         o["eligible_am"] = e["am"]
         o["eligible_se"] = e["se"]
+        o["eligible_sd"] = e["sd"]
     return jsonify({"owners": owners})
+
+
+ELIGIBILITY_COLUMNS = {"am": "eligible_am", "se": "eligible_se", "sd": "eligible_sd"}
 
 
 @app.route("/api/owners/<owner_id>/eligibility", methods=["POST"])
@@ -305,10 +317,10 @@ def set_owner_eligibility(owner_id):
     body = request.get_json()
     role = body.get("role")
     eligible = 1 if body.get("eligible") else 0
-    if role not in ("am", "se"):
-        return jsonify({"error": "role must be 'am' or 'se'"}), 400
+    if role not in ELIGIBILITY_COLUMNS:
+        return jsonify({"error": "role must be 'am', 'se', or 'sd'"}), 400
 
-    column = "eligible_am" if role == "am" else "eligible_se"
+    column = ELIGIBILITY_COLUMNS[role]
     with get_db() as conn:
         conn.execute(f"""
             INSERT INTO owner_eligibility (owner_id, {column})
@@ -780,9 +792,10 @@ def settings():
     owners = fetch_hubspot_owners()
     eligibility = get_owner_eligibility()
     for o in owners:
-        e = eligibility.get(o["id"], {"am": True, "se": True})
+        e = eligibility.get(o["id"], {"am": True, "se": True, "sd": True})
         o["eligible_am"] = e["am"]
         o["eligible_se"] = e["se"]
+        o["eligible_sd"] = e["sd"]
 
     email_template = get_setting("email_intro_template", DEFAULT_EMAIL_TEMPLATE)
 

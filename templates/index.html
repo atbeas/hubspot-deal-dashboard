@@ -763,7 +763,8 @@
 
   function ownerOptions(selectedId, showEmail, roleKey) {
     const none = `<option value="">— Select —</option>`;
-    const eligField = roleKey === 'am' ? 'eligible_am' : roleKey === 'se' ? 'eligible_se' : null;
+    const eligFieldMap = { am: 'eligible_am', se: 'eligible_se', sd: 'eligible_sd' };
+    const eligField = eligFieldMap[roleKey] || null;
     const list = eligField
       ? allOwners.filter(o => o[eligField] !== false || o.id === selectedId)
       : allOwners;
