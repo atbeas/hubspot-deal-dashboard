@@ -72,7 +72,7 @@
   </header>
 
   <main>
-    <div class="hint">Just booked a meeting? Give it a minute or two to appear, then add your notes below — they save straight to the deal's Business Needs field. Showing the last 7 days.</div>
+    <div class="hint">Just booked a meeting? Give it a minute or two to appear, then add your notes below — they save straight to the deal's Business Needs field. Once you submit, the deal drops off this list. Showing the last 7 days.</div>
     <div id="list"></div>
   </main>
 
@@ -104,8 +104,8 @@
             </div>
             <textarea placeholder="What does the prospect need? Add notes from the call...">${esc(d.business_needs)}</textarea>
             <div class="card-footer">
-              <button class="save-btn" onclick="save(this)">Save Notes</button>
-              <span class="save-status">Saved</span>
+              <button class="save-btn" onclick="submitNotes(this)">Submit Notes</button>
+              <span class="save-status">Submitted</span>
             </div>
           </div>
         `).join('');
@@ -114,28 +114,38 @@
       }
     }
 
-    async function save(btn) {
+    async function submitNotes(btn) {
       const card = btn.closest('.card');
       const dealId = card.dataset.id;
       const textarea = card.querySelector('textarea');
       const status = card.querySelector('.save-status');
-      btn.textContent = 'Saving…';
-      btn.classList.remove('saved');
+      btn.disabled = true;
+      btn.textContent = 'Submitting…';
       status.classList.remove('show');
       try {
-        const resp = await fetch(`/api/deals/${dealId}`, {
-          method: 'PATCH',
+        const resp = await fetch(`/api/quick-notes/${COMPANY}/${dealId}/submit`, {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ business_needs: textarea.value }),
         });
         if (!resp.ok) throw new Error(await resp.text());
-        btn.textContent = 'Save Notes';
+        btn.textContent = 'Submitted';
         btn.classList.add('saved');
         status.classList.add('show');
-        setTimeout(() => btn.classList.remove('saved'), 1500);
+        card.style.transition = 'opacity .3s, transform .3s';
+        card.style.opacity = '0';
+        card.style.transform = 'scale(.97)';
+        setTimeout(() => {
+          card.remove();
+          const list = document.getElementById('list');
+          if (!list.querySelector('.card')) {
+            list.innerHTML = '<div class="empty">No recent meetings yet. Tap Refresh once your deal is created.</div>';
+          }
+        }, 300);
       } catch (e) {
-        btn.textContent = 'Save Notes';
-        alert('Failed to save — ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Submit Notes';
+        alert('Failed to submit — ' + e.message);
       }
     }
 

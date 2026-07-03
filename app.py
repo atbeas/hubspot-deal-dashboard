@@ -38,6 +38,13 @@ def init_db():
                 password_hash TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS quick_notes_submitted (
+                deal_id TEXT PRIMARY KEY,
+                company TEXT NOT NULL,
+                submitted_at TEXT NOT NULL
+            )
+        """)
 
 init_db()
 
@@ -449,9 +456,17 @@ def get_quick_notes(company):
     if not resp.ok:
         return jsonify({"error": resp.text}), resp.status_code
 
+    with get_db() as conn:
+        submitted_ids = {
+            r["deal_id"] for r in
+            conn.execute("SELECT deal_id FROM quick_notes_submitted WHERE company = ?", [company]).fetchall()
+        }
+
     now = datetime.now(timezone.utc)
     deals = []
     for result in resp.json().get("results", []):
+        if result["id"] in submitted_ids:
+            continue
         props = result.get("properties", {})
         created_dt = datetime.fromisoformat(props["createdate"].replace("Z", "+00:00"))
         minutes_ago = int((now - created_dt).total_seconds() // 60)
@@ -472,6 +487,35 @@ def get_quick_notes(company):
         })
 
     return jsonify({"deals": deals})
+
+
+@app.route("/api/quick-notes/<company>/<deal_id>/submit", methods=["POST"])
+@quick_notes_login_required
+def submit_quick_note(company, deal_id):
+    locked = _locked_company_for_host()
+    if locked and locked != company:
+        return jsonify({"error": "This domain is only allowed to view its own company"}), 403
+
+    if company not in QUICK_NOTES_COMPANIES:
+        return jsonify({"error": "Unknown company"}), 404
+
+    body = request.get_json() or {}
+    resp = requests.patch(
+        f"{BASE_URL}/crm/v3/objects/deals/{deal_id}",
+        headers=HEADERS,
+        json={"properties": {"business_needs": body.get("business_needs", "")}},
+    )
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO quick_notes_submitted (deal_id, company, submitted_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(deal_id) DO NOTHING
+        """, [deal_id, company, datetime.now(timezone.utc).isoformat()])
+
+    return jsonify({"ok": True})
 
 
 @app.route("/admin")
