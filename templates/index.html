@@ -105,42 +105,14 @@
     }
     .amount { font-weight: 700; color: #22c55e; font-size: .9rem; }
 
-    /* role dropdowns row */
-    .card-body {
-      padding: 14px 20px 0; display: grid;
-      grid-template-columns: repeat(4, 1fr) auto;
-      gap: 12px; align-items: end; background: #1e2030;
+    /* ── Card main: assignees + calendar on the left, notes on the right ── */
+    .card-main {
+      display: grid; grid-template-columns: 1.15fr 1fr;
+      gap: 24px; padding: 16px 20px 18px; background: #1e2030;
     }
+    .card-left { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
-    /* SD Need Discovery section */
-    .card-needs { border-top: 1px solid #252839; }
-    .needs-toggle {
-      width: 100%; padding: 10px 20px;
-      display: flex; align-items: center; justify-content: space-between;
-      background: none; border: none; cursor: pointer;
-      font-family: inherit; text-align: left;
-    }
-    .needs-toggle:hover { background: #252839; }
-    .needs-label {
-      font-size: .73rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .5px; color: #8b8fa8;
-    }
-    .needs-label span { font-weight: 400; text-transform: none; letter-spacing: 0; color: #5c607a; font-size: .72rem; margin-left: 6px; }
-    .needs-chevron { font-size: .75rem; color: #5c607a; transition: transform .2s; }
-    .needs-chevron.open { transform: rotate(180deg); }
-    .needs-body { display: none; padding: 0 20px 16px; }
-    .needs-body.open { display: block; }
-    textarea.needs-input {
-      width: 100%; border: 1px solid #2a2d3e; border-radius: 7px;
-      padding: 9px 12px; font-size: .88rem; font-family: inherit;
-      color: #e8e9f0; resize: none; overflow: hidden; background: #252839;
-      outline: none; transition: border-color .2s, box-shadow .2s;
-      line-height: 1.5; min-height: 72px;
-    }
-    textarea.needs-input:focus { border-color: #ff5c35; box-shadow: 0 0 0 3px rgba(255,92,53,.15); }
-    textarea.needs-input.dirty     { background: rgba(251,191,36,.06); border-color: #fbbf24; }
-    textarea.needs-input.has-value { background: rgba(37,99,235,.1);   border-color: #3b82f6; }
-
+    .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .role-group { display: flex; flex-direction: column; gap: 5px; }
     .role-label { font-size: .73rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #8b8fa8; }
     .role-label.client { color: #a78bfa; }
@@ -158,7 +130,7 @@
     select.role-select.has-value { background: rgba(37,99,235,.12); border-color: #3b82f6; }
     select.role-select.dirty     { background: rgba(251,191,36,.08); border-color: #fbbf24; }
 
-    .submit-col { display: flex; align-items: flex-end; }
+    .left-footer { display: flex; justify-content: flex-end; }
     .btn-submit {
       padding: 9px 20px; border-radius: 7px; font-size: .88rem; font-weight: 600;
       cursor: pointer; border: none; background: #ff5c35; color: #fff;
@@ -168,12 +140,12 @@
     .btn-submit:disabled { opacity: .5; cursor: not-allowed; background: #ff5c35; }
     .btn-submit.saved { background: #22c55e; }
 
-    /* ── Meeting invite section ── */
-    .card-meeting {
-      padding: 12px 20px 16px; border-top: 1px solid #252839;
-      display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+    /* ── Meeting invite row (left column) ── */
+    .meeting-row {
+      display: flex; align-items: flex-end; gap: 10px;
+      border-top: 1px solid #252839; padding-top: 12px;
     }
-    .meeting-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 220px; position: relative; }
+    .meeting-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; position: relative; }
     .meeting-label { font-size: .73rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #8b8fa8; }
     .meeting-trigger {
       border: 1px solid #2a2d3e; border-radius: 7px; padding: 8px 10px;
@@ -214,6 +186,27 @@
     .btn-invite:disabled { opacity: .5; cursor: not-allowed; }
     .btn-invite.invited { background: #22c55e; }
 
+    /* ── Notes (right column) ── */
+    .card-right {
+      display: flex; flex-direction: column; gap: 6px;
+      border-left: 1px solid #252839; padding-left: 24px;
+    }
+    .notes-label {
+      font-size: .73rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: #8b8fa8;
+    }
+    .notes-label span { font-weight: 400; text-transform: none; letter-spacing: 0; color: #5c607a; font-size: .72rem; margin-left: 6px; }
+    textarea.needs-input {
+      width: 100%; flex: 1; border: 1px solid #2a2d3e; border-radius: 7px;
+      padding: 9px 12px; font-size: .88rem; font-family: inherit;
+      color: #e8e9f0; resize: vertical; background: #252839;
+      outline: none; transition: border-color .2s, box-shadow .2s;
+      line-height: 1.5; min-height: 110px;
+    }
+    textarea.needs-input:focus { border-color: #ff5c35; box-shadow: 0 0 0 3px rgba(255,92,53,.15); }
+    textarea.needs-input.dirty     { background: rgba(251,191,36,.06); border-color: #fbbf24; }
+    textarea.needs-input.has-value { background: rgba(37,99,235,.1);   border-color: #3b82f6; }
+
     /* ── Empty / loading ── */
     .state-box {
       background: #1e2030; border: 1px solid #2a2d3e; border-radius: 10px;
@@ -240,11 +233,11 @@
 
     /* responsive */
     @media (max-width: 900px) {
-      .card-body { grid-template-columns: 1fr 1fr; }
-      .submit-col { grid-column: 1 / -1; }
+      .card-main { grid-template-columns: 1fr; }
+      .card-right { border-left: none; padding-left: 0; border-top: 1px solid #252839; padding-top: 14px; }
     }
     @media (max-width: 600px) {
-      .card-body { grid-template-columns: 1fr; }
+      .role-grid { grid-template-columns: 1fr; }
       .filters { padding: 12px 16px; }
       .cards, .stats { padding-left: 16px; padding-right: 16px; }
       .card-header { padding: 12px 16px; }
@@ -623,50 +616,49 @@
           ${d.amount ? `<div class="amount">${esc(d.amount)}</div>` : ''}
         </div>
       </div>
-      <div class="card-body">
-        ${dropdowns}
-        <div class="submit-col">
-          <button class="btn-submit ${statusCls}" id="btn-${d.id}"
-                  onclick="submitDeal('${d.id}')">
-            ${allFilled ? '✓ Saved' : 'Submit'}
-          </button>
-        </div>
-      </div>
-      <div class="card-meeting">
-        <div class="meeting-group" id="meetinggroup-${d.id}">
-          <span class="meeting-label">Add Team to Calendar Invite</span>
-          <button type="button" class="meeting-trigger" id="meetingtrigger-${d.id}"
-                  onclick="toggleMeetingDropdown('${d.id}')">
-            <span class="trigger-text" id="meetingtext-${d.id}">— Select meeting —</span>
-            <span class="trigger-arrow">▼</span>
-          </button>
-          <div class="meeting-dropdown" id="meetingdrop-${d.id}">
-            <input class="meeting-dropdown-search" type="text" placeholder="Search meetings…"
-                   oninput="filterMeetingOptions('${d.id}', this.value)"
-                   onclick="event.stopPropagation()" />
-            <div class="meeting-list" id="meetinglist-${d.id}">
-              ${allMeetings.length
-                ? allMeetings.map(m => `
-                  <div class="meeting-option" data-id="${esc(m.id)}" data-label="${esc(m.label)}"
-                       onclick="selectMeeting('${d.id}', this)">
-                    ${esc(m.label)}
-                  </div>`).join('')
-                : '<div class="meeting-empty">No meetings found</div>'
-              }
-            </div>
+      <div class="card-main">
+        <div class="card-left">
+          <div class="role-grid">
+            ${dropdowns}
           </div>
-          <input type="hidden" id="meeting-${d.id}" value="" />
+          <div class="left-footer">
+            <button class="btn-submit ${statusCls}" id="btn-${d.id}"
+                    onclick="submitDeal('${d.id}')">
+              ${allFilled ? '✓ Saved' : 'Submit'}
+            </button>
+          </div>
+          <div class="meeting-row">
+            <div class="meeting-group" id="meetinggroup-${d.id}">
+              <span class="meeting-label">Add Team to Calendar Invite</span>
+              <button type="button" class="meeting-trigger" id="meetingtrigger-${d.id}"
+                      onclick="toggleMeetingDropdown('${d.id}')">
+                <span class="trigger-text" id="meetingtext-${d.id}">— Select meeting —</span>
+                <span class="trigger-arrow">▼</span>
+              </button>
+              <div class="meeting-dropdown" id="meetingdrop-${d.id}">
+                <input class="meeting-dropdown-search" type="text" placeholder="Search meetings…"
+                       oninput="filterMeetingOptions('${d.id}', this.value)"
+                       onclick="event.stopPropagation()" />
+                <div class="meeting-list" id="meetinglist-${d.id}">
+                  ${allMeetings.length
+                    ? allMeetings.map(m => `
+                      <div class="meeting-option" data-id="${esc(m.id)}" data-label="${esc(m.label)}"
+                           onclick="selectMeeting('${d.id}', this)">
+                        ${esc(m.label)}
+                      </div>`).join('')
+                    : '<div class="meeting-empty">No meetings found</div>'
+                  }
+                </div>
+              </div>
+              <input type="hidden" id="meeting-${d.id}" value="" />
+            </div>
+            <button class="btn-invite" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
+              Add to Invite
+            </button>
+          </div>
         </div>
-        <button class="btn-invite" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
-          Add to Invite
-        </button>
-      </div>
-      <div class="card-needs">
-        <button class="needs-toggle" onclick="toggleNeeds('${d.id}')">
-          <span class="needs-label">SD Need Discovery <span>· business_needs</span></span>
-          <span class="needs-chevron ${needsHasValue ? 'open' : ''}" id="chevron-${d.id}">▼</span>
-        </button>
-        <div class="needs-body ${needsHasValue ? 'open' : ''}" id="needsbody-${d.id}">
+        <div class="card-right">
+          <span class="notes-label">Deal Notes <span>· business_needs</span></span>
           <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
                     id="needs-${d.id}"
                     data-deal="${d.id}"
@@ -686,22 +678,7 @@
     btn.disabled = false;
   }
 
-  function autoResize(ta) {
-    ta.style.height = 'auto';
-    ta.style.height = ta.scrollHeight + 'px';
-  }
-
-  function toggleNeeds(dealId) {
-    const body    = document.getElementById(`needsbody-${dealId}`);
-    const chevron = document.getElementById(`chevron-${dealId}`);
-    const ta      = document.getElementById(`needs-${dealId}`);
-    const isOpen  = body.classList.toggle('open');
-    chevron.classList.toggle('open', isOpen);
-    if (isOpen) autoResize(ta);
-  }
-
   function markNeedsDirty(textarea) {
-    autoResize(textarea);
     textarea.classList.remove('has-value');
     textarea.classList.add('dirty');
     const btn = document.getElementById(`btn-${textarea.dataset.deal}`);
