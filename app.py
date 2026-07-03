@@ -260,7 +260,7 @@ def fetch_hubspot_owners():
         data = resp.json()
         for o in data.get("results", []):
             if not o.get("archived"):
-                name = f"{o.get('firstName','')} {o.get('lastName','')}".strip()
+                name = f"{o.get('firstName','')} {o.get('lastName','')}".strip() or o.get("email", "")
                 if name:
                     owners.append({
                         "id":    str(o["id"]),
