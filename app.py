@@ -342,7 +342,7 @@ def get_quick_notes(company):
     if not cfg:
         return jsonify({"error": "Unknown company"}), 404
 
-    hours = int(request.args.get("hours", 24))
+    hours = int(request.args.get("hours", 36))
     since_ms = int((datetime.now(timezone.utc) - timedelta(hours=hours)).timestamp() * 1000)
 
     payload = {
