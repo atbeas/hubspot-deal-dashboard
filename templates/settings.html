@@ -75,6 +75,30 @@
     .btn-save:disabled { opacity: .5; cursor: not-allowed; }
     .btn-save.saved { background: #059669; }
 
+    .section-gap { margin-top: 40px; }
+
+    .owner-table {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 12px; overflow: hidden;
+    }
+    .owner-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 110px 110px;
+      gap: 12px; align-items: center;
+      padding: 12px 20px; border-bottom: 1px solid #f0f0f0;
+    }
+    .owner-row:last-child { border-bottom: none; }
+    .owner-row.header-row {
+      background: #f9fafb; padding: 10px 20px;
+      font-size: .72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: #6b7280;
+    }
+    .owner-row.header-row .col-check { text-align: center; }
+    .owner-name  { font-size: .88rem; font-weight: 600; color: #1a1a2e; }
+    .owner-email { font-size: .84rem; color: #6b7280; }
+    .owner-row.hidden { display: none; }
+    .col-check { text-align: center; }
+    .col-check input[type=checkbox] { width: 17px; height: 17px; cursor: pointer; accent-color: #ff5c35; }
+
     #toast {
       position: fixed; bottom: 24px; right: 24px;
       background: #1a1a2e; color: #fff; padding: 11px 18px;
@@ -135,6 +159,38 @@
     </div>
     {% endfor %}
   </div>
+
+  <div class="page-header section-gap">
+    <h2>Assignable Owners</h2>
+    <p>Check who can be assigned as Account Manager or Sales Executive. Unchecked users won't appear in those dropdowns on the dashboard (Sales Dev is unaffected).</p>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" placeholder="Search owners…" oninput="filterOwners(this.value)" />
+  </div>
+
+  <div class="owner-table">
+    <div class="owner-row header-row">
+      <div>Name</div>
+      <div>Email</div>
+      <div class="col-check">Account Manager</div>
+      <div class="col-check">Sales Executive</div>
+    </div>
+    {% for o in owners %}
+    <div class="owner-row" data-label="{{ (o.name ~ ' ' ~ o.email) | lower }}">
+      <div class="owner-name">{{ o.name }}</div>
+      <div class="owner-email">{{ o.email }}</div>
+      <div class="col-check">
+        <input type="checkbox" {{ 'checked' if o.eligible_am }}
+               onchange="setEligibility('{{ o.id }}', 'am', this.checked, this)" />
+      </div>
+      <div class="col-check">
+        <input type="checkbox" {{ 'checked' if o.eligible_se }}
+               onchange="setEligibility('{{ o.id }}', 'se', this.checked, this)" />
+      </div>
+    </div>
+    {% endfor %}
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -180,6 +236,31 @@
       btn.textContent = 'Save';
       btn.disabled = false;
       showToast('Failed to save', true);
+    }
+  }
+
+  function filterOwners(query) {
+    const q = query.toLowerCase();
+    document.querySelectorAll('.owner-row:not(.header-row)').forEach(row => {
+      row.classList.toggle('hidden', !row.dataset.label.includes(q));
+    });
+  }
+
+  async function setEligibility(ownerId, role, eligible, checkbox) {
+    checkbox.disabled = true;
+    try {
+      const resp = await fetch(`/api/owners/${encodeURIComponent(ownerId)}/eligibility`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, eligible }),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      showToast(`${role === 'am' ? 'Account Manager' : 'Sales Executive'} eligibility updated`);
+    } catch (e) {
+      checkbox.checked = !eligible;
+      showToast('Failed to save', true);
+    } finally {
+      checkbox.disabled = false;
     }
   }
 

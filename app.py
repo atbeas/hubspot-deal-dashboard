@@ -24,6 +24,13 @@ def init_db():
                 email3 TEXT DEFAULT ''
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS owner_eligibility (
+                owner_id TEXT PRIMARY KEY,
+                eligible_am INTEGER DEFAULT 1,
+                eligible_se INTEGER DEFAULT 1
+            )
+        """)
 
 init_db()
 
@@ -107,9 +114,7 @@ def index():
     return render_template("index.html", client_options=client_options)
 
 
-@app.route("/api/owners")
-@login_required
-def get_owners():
+def fetch_hubspot_owners():
     owners = []
     after = None
     while True:
@@ -133,7 +138,44 @@ def get_owners():
         if not after:
             break
     owners.sort(key=lambda x: x["name"].lower())
+    return owners
+
+
+def get_owner_eligibility():
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM owner_eligibility").fetchall()
+    return {r["owner_id"]: {"am": bool(r["eligible_am"]), "se": bool(r["eligible_se"])} for r in rows}
+
+
+@app.route("/api/owners")
+@login_required
+def get_owners():
+    owners = fetch_hubspot_owners()
+    eligibility = get_owner_eligibility()
+    for o in owners:
+        e = eligibility.get(o["id"], {"am": True, "se": True})
+        o["eligible_am"] = e["am"]
+        o["eligible_se"] = e["se"]
     return jsonify({"owners": owners})
+
+
+@app.route("/api/owners/<owner_id>/eligibility", methods=["POST"])
+@login_required
+def set_owner_eligibility(owner_id):
+    body = request.get_json()
+    role = body.get("role")
+    eligible = 1 if body.get("eligible") else 0
+    if role not in ("am", "se"):
+        return jsonify({"error": "role must be 'am' or 'se'"}), 400
+
+    column = "eligible_am" if role == "am" else "eligible_se"
+    with get_db() as conn:
+        conn.execute(f"""
+            INSERT INTO owner_eligibility (owner_id, {column})
+            VALUES (?, ?)
+            ON CONFLICT(owner_id) DO UPDATE SET {column} = excluded.{column}
+        """, [owner_id, eligible])
+    return jsonify({"ok": True})
 
 
 @app.route("/api/deals")
@@ -349,7 +391,14 @@ def settings():
         c["email2"] = saved.get("email2", "")
         c["email3"] = saved.get("email3", "")
 
-    return render_template("settings.html", client_options=client_options)
+    owners = fetch_hubspot_owners()
+    eligibility = get_owner_eligibility()
+    for o in owners:
+        e = eligibility.get(o["id"], {"am": True, "se": True})
+        o["eligible_am"] = e["am"]
+        o["eligible_se"] = e["se"]
+
+    return render_template("settings.html", client_options=client_options, owners=owners)
 
 
 @app.route("/api/clients/<client_value>", methods=["POST"])

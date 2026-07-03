@@ -572,9 +572,13 @@
     document.getElementById('cardsWrap').innerHTML = allDeals.map(d => cardHtml(d)).join('');
   }
 
-  function ownerOptions(selectedId, showEmail) {
+  function ownerOptions(selectedId, showEmail, roleKey) {
     const none = `<option value="">— Select —</option>`;
-    return none + allOwners.map(o => {
+    const eligField = roleKey === 'am' ? 'eligible_am' : roleKey === 'se' ? 'eligible_se' : null;
+    const list = eligField
+      ? allOwners.filter(o => o[eligField] !== false || o.id === selectedId)
+      : allOwners;
+    return none + list.map(o => {
       const label = showEmail && o.email ? `${o.name} (${o.email})` : o.name;
       return `<option value="${esc(o.id)}" ${o.id === selectedId ? 'selected' : ''}>${esc(label)}</option>`;
     }).join('');
@@ -594,7 +598,7 @@
 
     const dropdowns = ROLE_KEYS.map(k => {
       const meta = ROLE_META[k];
-      const opts = meta.type === 'enum' ? clientOptions(d[k]) : ownerOptions(d[k], k === 'am' || k === 'se');
+      const opts = meta.type === 'enum' ? clientOptions(d[k]) : ownerOptions(d[k], k === 'am' || k === 'se', k);
       return `
         <div class="role-group">
           <span class="role-label ${meta.cls}">${meta.label}</span>
