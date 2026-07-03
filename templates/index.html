@@ -406,6 +406,7 @@
   }
 
   function selectMeeting(dealId, el) {
+    const changed = document.getElementById(`meeting-${dealId}`).value !== el.dataset.id;
     document.getElementById(`meeting-${dealId}`).value        = el.dataset.id;
     document.getElementById(`meetingtext-${dealId}`).textContent = el.dataset.label;
     document.getElementById(`meetingtrigger-${dealId}`).classList.add('has-value');
@@ -413,6 +414,12 @@
     document.getElementById(`meetingtrigger-${dealId}`).classList.remove('open');
     document.getElementById(`meetinglist-${dealId}`).querySelectorAll('.meeting-option')
       .forEach(o => o.classList.toggle('selected', o === el));
+
+    if (changed) {
+      const btn = document.getElementById(`invite-${dealId}`);
+      btn.classList.remove('invited');
+      btn.textContent = 'Add to Invite';
+    }
   }
 
   // Close dropdowns when clicking outside
@@ -612,6 +619,8 @@
     const hasValue = k => !!d[k];
     const allFilled = ROLE_KEYS.every(hasValue);
     const statusCls = allFilled ? 'saved' : '';
+    const inviteStatusCls = d.meeting_id ? 'invited' : '';
+    const notesStatusCls = d.client_facing_notes ? 'saved' : '';
 
     const dropdowns = ROLE_KEYS.map(k => {
       const meta = ROLE_META[k];
@@ -682,8 +691,8 @@
                 </div>
                 <input type="hidden" id="meeting-${d.id}" value="${d.meeting_id ? esc(d.meeting_id) : ''}" />
               </div>
-              <button class="btn-invite" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
-                Add to Invite
+              <button class="btn-invite ${inviteStatusCls}" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
+                ${d.meeting_id ? '✓ Added' : 'Add to Invite'}
               </button>
             </div>
           </div>
@@ -707,9 +716,9 @@
                       placeholder="Edit the notes above into client-friendly language before sending."
                       oninput="markNeedsDirty(this)">${esc(d.client_facing_notes)}</textarea>
             <div class="notes-footer">
-              <button class="btn-submit" id="notesbtn-${d.id}"
+              <button class="btn-submit ${notesStatusCls}" id="notesbtn-${d.id}"
                       onclick="submitNotes('${d.id}')">
-                Save Notes
+                ${d.client_facing_notes ? '✓ Saved' : 'Save Notes'}
               </button>
             </div>
           </div>
