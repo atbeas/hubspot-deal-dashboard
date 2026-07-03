@@ -152,7 +152,6 @@
     /* ── Meeting invite row (left column) ── */
     .meeting-row {
       display: flex; align-items: flex-end; gap: 10px;
-      border-top: 1px solid #252839; padding-top: 12px;
     }
     .meeting-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; position: relative; }
     .meeting-label { font-size: .73rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #8b8fa8; }
@@ -643,34 +642,37 @@
               </button>
             </div>
           </div>
-          <div class="meeting-row">
-            <div class="meeting-group" id="meetinggroup-${d.id}">
-              <span class="meeting-label">Add Team to Calendar Invite</span>
-              <button type="button" class="meeting-trigger" id="meetingtrigger-${d.id}"
-                      onclick="toggleMeetingDropdown('${d.id}')">
-                <span class="trigger-text" id="meetingtext-${d.id}">— Select meeting —</span>
-                <span class="trigger-arrow">▼</span>
-              </button>
-              <div class="meeting-dropdown" id="meetingdrop-${d.id}">
-                <input class="meeting-dropdown-search" type="text" placeholder="Search meetings…"
-                       oninput="filterMeetingOptions('${d.id}', this.value)"
-                       onclick="event.stopPropagation()" />
-                <div class="meeting-list" id="meetinglist-${d.id}">
-                  ${allMeetings.length
-                    ? allMeetings.map(m => `
-                      <div class="meeting-option" data-id="${esc(m.id)}" data-label="${esc(m.label)}"
-                           onclick="selectMeeting('${d.id}', this)">
-                        ${esc(m.label)}
-                      </div>`).join('')
-                    : '<div class="meeting-empty">No meetings found</div>'
-                  }
+          <div class="step-box">
+            <span class="step-label">Step 2</span>
+            <div class="meeting-row">
+              <div class="meeting-group" id="meetinggroup-${d.id}">
+                <span class="meeting-label">Add Team to Calendar Invite</span>
+                <button type="button" class="meeting-trigger" id="meetingtrigger-${d.id}"
+                        onclick="toggleMeetingDropdown('${d.id}')">
+                  <span class="trigger-text" id="meetingtext-${d.id}">— Select meeting —</span>
+                  <span class="trigger-arrow">▼</span>
+                </button>
+                <div class="meeting-dropdown" id="meetingdrop-${d.id}">
+                  <input class="meeting-dropdown-search" type="text" placeholder="Search meetings…"
+                         oninput="filterMeetingOptions('${d.id}', this.value)"
+                         onclick="event.stopPropagation()" />
+                  <div class="meeting-list" id="meetinglist-${d.id}">
+                    ${allMeetings.length
+                      ? allMeetings.map(m => `
+                        <div class="meeting-option" data-id="${esc(m.id)}" data-label="${esc(m.label)}"
+                             onclick="selectMeeting('${d.id}', this)">
+                          ${esc(m.label)}
+                        </div>`).join('')
+                      : '<div class="meeting-empty">No meetings found</div>'
+                    }
+                  </div>
                 </div>
+                <input type="hidden" id="meeting-${d.id}" value="" />
               </div>
-              <input type="hidden" id="meeting-${d.id}" value="" />
+              <button class="btn-invite" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
+                Add to Invite
+              </button>
             </div>
-            <button class="btn-invite" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
-              Add to Invite
-            </button>
           </div>
         </div>
         <div class="card-right">
