@@ -311,6 +311,78 @@ def get_deal_meetings():
     return {r["deal_id"]: {"id": r["meeting_id"], "label": r["meeting_label"]} for r in rows}
 
 
+def _chunks(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
+
+def get_initial_meeting_times(deal_ids):
+    if not deal_ids:
+        return {}
+
+    deal_to_contact = {}
+    for chunk in _chunks(deal_ids, 100):
+        resp = requests.post(
+            f"{BASE_URL}/crm/v4/associations/deals/contacts/batch/read",
+            headers=HEADERS,
+            json={"inputs": [{"id": d} for d in chunk]},
+        )
+        if not resp.ok:
+            continue
+        for r in resp.json().get("results", []):
+            to = r.get("to", [])
+            if to:
+                deal_to_contact[r["from"]["id"]] = str(to[0]["toObjectId"])
+
+    contact_ids = list(set(deal_to_contact.values()))
+    if not contact_ids:
+        return {}
+
+    contact_to_meetings = {}
+    for chunk in _chunks(contact_ids, 100):
+        resp = requests.post(
+            f"{BASE_URL}/crm/v4/associations/contacts/meetings/batch/read",
+            headers=HEADERS,
+            json={"inputs": [{"id": c} for c in chunk]},
+        )
+        if not resp.ok:
+            continue
+        for r in resp.json().get("results", []):
+            contact_to_meetings[r["from"]["id"]] = [str(t["toObjectId"]) for t in r.get("to", [])]
+
+    meeting_ids = list({m for ms in contact_to_meetings.values() for m in ms})
+    if not meeting_ids:
+        return {}
+
+    meeting_times = {}
+    for chunk in _chunks(meeting_ids, 100):
+        resp = requests.post(
+            f"{BASE_URL}/crm/v3/objects/meetings/batch/read",
+            headers=HEADERS,
+            json={"properties": ["hs_meeting_start_time"], "inputs": [{"id": m} for m in chunk]},
+        )
+        if not resp.ok:
+            continue
+        for r in resp.json().get("results", []):
+            start = r.get("properties", {}).get("hs_meeting_start_time")
+            if start:
+                meeting_times[r["id"]] = start
+
+    result = {}
+    for deal_id, contact_id in deal_to_contact.items():
+        times = [meeting_times[m] for m in contact_to_meetings.get(contact_id, []) if m in meeting_times]
+        if not times:
+            continue
+        earliest = min(times)
+        try:
+            dt = datetime.fromisoformat(earliest.replace("Z", "+00:00"))
+            result[deal_id] = dt.strftime("%b %d, %Y %-I:%M %p")
+        except Exception:
+            continue
+
+    return result
+
+
 def get_deal_prep_emails():
     with get_db() as conn:
         rows = conn.execute("SELECT deal_id FROM deal_prep_email").fetchall()
@@ -408,6 +480,7 @@ def get_deals():
     prep_emails_sent = get_deal_prep_emails()
     handoff_emails_sent = get_deal_handoff_emails()
     deal_archive = get_deal_archive()
+    initial_meeting_times = get_initial_meeting_times([r["id"] for r in data.get("results", [])])
 
     def resolve_owner(owner_id):
         if not owner_id:
@@ -467,6 +540,7 @@ def get_deals():
             "client_facing_notes": props.get("client_facing_notes") or "",
             "meeting_id":    meeting.get("id", ""),
             "meeting_label": meeting.get("label", ""),
+            "initial_meeting": initial_meeting_times.get(result["id"], ""),
             "prep_email_sent": result["id"] in prep_emails_sent,
             "handoff_email_sent": result["id"] in handoff_emails_sent,
             "archived":    is_archived,

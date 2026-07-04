@@ -95,8 +95,10 @@
       padding: 14px 20px; display: flex; align-items: center; gap: 16px;
       border-bottom: 1px solid #252839; flex-wrap: wrap;
     }
-    .deal-name { font-weight: 700; font-size: .95rem; color: #e8e9f0; flex: 1; min-width: 160px; text-decoration: none; }
+    .deal-name-wrap { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 160px; }
+    .deal-name { font-weight: 700; font-size: .95rem; color: #e8e9f0; text-decoration: none; }
     .deal-name:hover { color: #ff5c35; text-decoration: underline; }
+    .initial-meeting { font-size: .76rem; color: #8b8fa8; }
     .meta { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
     .meta-item { font-size: .8rem; color: #8b8fa8; display: flex; flex-direction: column; gap: 1px; }
     .meta-item strong { color: #c9cad8; font-weight: 600; }
@@ -1034,7 +1036,10 @@
     return `
     <div class="card" id="card-${d.id}">
       <div class="card-header">
-        <a class="deal-name" href="https://app.hubspot.com/contacts/23416553/deal/${d.id}" target="_blank" rel="noopener">${esc(d.name)}</a>
+        <div class="deal-name-wrap">
+          <a class="deal-name" href="https://app.hubspot.com/contacts/23416553/deal/${d.id}" target="_blank" rel="noopener">${esc(d.name)}</a>
+          ${d.initial_meeting ? `<span class="initial-meeting">📅 ${esc(d.initial_meeting)}</span>` : ''}
+        </div>
         <div class="meta">
           <div class="meta-item"><span>Created</span><strong>${esc(d.created)}</strong></div>
           <div class="meta-item"><span>Owner</span><strong>${esc(d.owner) || '—'}</strong></div>
