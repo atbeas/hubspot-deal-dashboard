@@ -111,9 +111,10 @@
 
     /* ── Card main: assignees + calendar on the left, notes on the right ── */
     .card-main {
-      display: grid; grid-template-columns: 1fr 1fr;
-      gap: 24px; padding: 16px 20px 18px; background: #1e2030;
+      display: flex; flex-direction: column; gap: 16px;
+      padding: 16px 20px 18px; background: #1e2030;
     }
+    .card-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
     .card-left { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
     .step-box {
@@ -212,28 +213,33 @@
     .btn-invite.sent { background: #22c55e; }
     .btn-invite.sent:hover { background: #16a34a; }
 
-    /* ── Step 3: same-time conflict check ── */
-    .step3-row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
-    .step3-main { flex: 1 1 220px; min-width: 220px; }
+    /* ── Step 3: full-width, meeting picker left / same-time conflict check right ── */
+    .step3-full { width: 100%; }
+    .step3-row { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; }
+    .step3-main { flex: 0 1 380px; min-width: 260px; }
     .conflict-panel {
-      flex: 1 1 200px; min-width: 200px; max-width: 260px;
-      border-left: 1px solid #2a2d3e; padding-left: 16px;
-      display: flex; flex-direction: column; gap: 8px;
+      flex: 1 1 420px; min-width: 280px;
+      border-left: 1px solid #2a2d3e; padding-left: 24px;
+      display: flex; flex-direction: column; gap: 10px;
     }
     .conflict-panel-label {
       font-size: .7rem; font-weight: 800; text-transform: uppercase;
       letter-spacing: .5px; color: #8b8fa8;
     }
     .conflict-empty { font-size: .8rem; color: #4ade80; }
+    .conflict-list { display: flex; flex-wrap: wrap; gap: 10px; }
     .conflict-item {
-      font-size: .78rem; color: #c9cad8; background: #252839; border: 1px solid #2a2d3e;
-      border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
+      flex: 1 1 260px; font-size: .78rem; color: #c9cad8; background: #252839;
+      border: 1px solid #2a2d3e; border-radius: 6px; padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 5px;
     }
     .conflict-item .conflict-meeting { font-weight: 600; color: #e8e9f0; }
-    .conflict-item .conflict-deal { color: #8b8fa8; }
+    .conflict-item .conflict-deal { color: #8b8fa8; margin-bottom: 2px; }
+    .conflict-role-line { color: #c9cad8; }
+    .conflict-role-line .role-empty { color: #5c607a; }
     .conflict-role-warning { color: #f87171; font-weight: 700; }
     @media (max-width: 720px) {
-      .conflict-panel { border-left: none; padding-left: 0; border-top: 1px solid #2a2d3e; padding-top: 12px; max-width: none; }
+      .conflict-panel { border-left: none; padding-left: 0; border-top: 1px solid #2a2d3e; padding-top: 14px; }
     }
 
     /* ── Step 7: archive ── */
@@ -309,7 +315,7 @@
 
     /* responsive */
     @media (max-width: 900px) {
-      .card-main { grid-template-columns: 1fr; }
+      .card-columns { grid-template-columns: 1fr; }
       .card-right { border-left: none; padding-left: 0; border-top: 1px solid #252839; padding-top: 14px; }
     }
     @media (max-width: 600px) {
@@ -622,15 +628,22 @@
       return '<div class="conflict-empty">✓ No other meetings at this time</div>';
     }
     return conflicts.map(c => {
-      const roleLines = c.roleMatches.map(role => {
-        const val = role === 'client' ? c.otherDeal[role] : ownerName(c.otherDeal[role]) || c.otherDeal[role];
-        return `<div class="conflict-role-warning">⚠ ${CONFLICT_ROLE_LABELS[role]}: ${esc(val)}</div>`;
+      // Always list who's already assigned on the other meeting — not just
+      // roles that happen to clash — so a double-booking can be caught by eye
+      // before adding someone, without checking every other calendar by hand.
+      const roleLines = Object.keys(CONFLICT_ROLE_LABELS).map(role => {
+        const raw = c.otherDeal ? c.otherDeal[role] : '';
+        const val = raw ? (role === 'client' ? raw : (ownerName(raw) || raw)) : '';
+        const isMatch = c.roleMatches.includes(role);
+        const cls = isMatch ? 'conflict-role-warning' : 'conflict-role-line';
+        const display = val ? esc(val) : '<span class="role-empty">— unassigned —</span>';
+        return `<div class="${cls}">${isMatch ? '⚠ ' : ''}${CONFLICT_ROLE_LABELS[role]}: ${display}</div>`;
       }).join('');
       return `
         <div class="conflict-item">
           <div class="conflict-meeting">${esc(c.meeting.label)}</div>
           ${c.otherDeal ? `<div class="conflict-deal">${esc(c.otherDeal.name)}</div>` : '<div class="conflict-deal">(not linked to a loaded deal)</div>'}
-          ${roleLines}
+          ${c.otherDeal ? roleLines : ''}
         </div>`;
     }).join('');
   }
@@ -1179,124 +1192,126 @@
         </div>
       </div>
       <div class="card-main">
-        <div class="card-left">
-          <div class="step-box">
-            <span class="step-label">Step 1 (review SD Notes)</span>
-            <div class="note-block">
-              <div class="notes-label-row">
-                <span class="notes-label">Deal Notes <span>· business_needs</span></span>
-                <button type="button" class="btn-expand" onclick="toggleNotesExpand(this)">⤢ Expand</button>
-              </div>
-              <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
-                        id="needs-${d.id}"
-                        data-deal="${d.id}"
-                        placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
-                        oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
-            </div>
-          </div>
-          <div class="step-box">
-            <span class="step-label">Step 2 (assign the right team to the deal)</span>
-            <div class="role-grid">
-              ${dropdowns}
-            </div>
-            <div class="left-footer">
-              <button class="btn-submit ${statusCls}" id="btn-${d.id}"
-                      onclick="submitDeal('${d.id}')">
-                ${allFilled ? '✓ Saved' : 'Submit'}
-              </button>
-            </div>
-          </div>
-          <div class="step-box">
-            <span class="step-label">Step 3 (add the team to the meeting invite)</span>
-            <div class="step3-row">
-              <div class="step3-main">
-                <div class="meeting-row">
-                  <div class="meeting-group" id="meetinggroup-${d.id}">
-                    <span class="meeting-label">Add Team to Calendar Invite</span>
-                    <button type="button" class="meeting-trigger ${meetingTriggerCls}" id="meetingtrigger-${d.id}"
-                            onclick="toggleMeetingDropdown('${d.id}')">
-                      <span class="trigger-text" id="meetingtext-${d.id}">${esc(meetingText)}</span>
-                      ${suggestedMeeting ? '<span class="suggested-badge">Suggested — confirm</span>' : ''}
-                      <span class="trigger-arrow">▼</span>
-                    </button>
-                    <div class="meeting-dropdown" id="meetingdrop-${d.id}">
-                      <input class="meeting-dropdown-search" type="text" placeholder="Search meetings…"
-                             oninput="filterMeetingOptions('${d.id}', this.value)"
-                             onclick="event.stopPropagation()" />
-                      <div class="meeting-list" id="meetinglist-${d.id}">
-                        ${allMeetings.length
-                          ? allMeetings.map(m => `
-                            <div class="meeting-option" data-id="${esc(m.id)}" data-label="${esc(m.label)}"
-                                 onclick="selectMeeting('${d.id}', this)">
-                              ${esc(m.label)}
-                            </div>`).join('')
-                          : '<div class="meeting-empty">No meetings found</div>'
-                        }
-                      </div>
-                    </div>
-                    <input type="hidden" id="meeting-${d.id}" value="${esc(meetingValue)}" />
-                  </div>
-                  <button class="btn-invite ${inviteStatusCls}" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
-                    ${d.meeting_id ? '✓ Added' : 'Add to Invite'}
-                  </button>
+        <div class="card-columns">
+          <div class="card-left">
+            <div class="step-box">
+              <span class="step-label">Step 1 (review SD Notes)</span>
+              <div class="note-block">
+                <div class="notes-label-row">
+                  <span class="notes-label">Deal Notes <span>· business_needs</span></span>
+                  <button type="button" class="btn-expand" onclick="toggleNotesExpand(this)">⤢ Expand</button>
                 </div>
-              </div>
-              <div class="conflict-panel">
-                <span class="conflict-panel-label">Other Meetings At This Time</span>
-                ${conflictsHtml}
+                <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
+                          id="needs-${d.id}"
+                          data-deal="${d.id}"
+                          placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
+                          oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
               </div>
             </div>
-          </div>
-        </div>
-        <div class="card-right">
-          <div class="step-box">
-            <span class="step-label">Step 4 (edit the meeting notes for the client)</span>
-            <div class="note-block">
-              <div class="notes-label-row">
-                <span class="notes-label">Client-Facing Notes <span>· will be emailed to client</span></span>
-                <button type="button" class="btn-expand" onclick="toggleNotesExpand(this)">⤢ Expand</button>
+            <div class="step-box">
+              <span class="step-label">Step 2 (assign the right team to the deal)</span>
+              <div class="role-grid">
+                ${dropdowns}
               </div>
-              <textarea class="needs-input ${cfnHasValue ? 'has-value' : ''}"
-                        id="cfn-${d.id}"
-                        data-deal="${d.id}"
-                        placeholder="Edit the notes above into client-friendly language before sending."
-                        oninput="markNeedsDirty(this)">${esc(d.client_facing_notes)}</textarea>
-              <div class="notes-footer">
-                <button class="btn-submit ${notesStatusCls}" id="notesbtn-${d.id}"
-                        onclick="submitNotes('${d.id}')">
-                  ${d.client_facing_notes ? '✓ Saved' : 'Save Notes'}
+              <div class="left-footer">
+                <button class="btn-submit ${statusCls}" id="btn-${d.id}"
+                        onclick="submitDeal('${d.id}')">
+                  ${allFilled ? '✓ Saved' : 'Submit'}
                 </button>
               </div>
             </div>
           </div>
-          <div class="step-box">
-            <span class="step-label">Step 5 (send prep notes to client)</span>
-            <div class="notes-footer">
-              <button class="btn-invite ${sentCls}" id="sendemail-${d.id}"
-                      onclick="openSendEmailModal('${d.id}')">
-                ${d.prep_email_sent ? '✓ Sent' : 'Send Prep Email'}
-              </button>
+          <div class="card-right">
+            <div class="step-box">
+              <span class="step-label">Step 4 (edit the meeting notes for the client)</span>
+              <div class="note-block">
+                <div class="notes-label-row">
+                  <span class="notes-label">Client-Facing Notes <span>· will be emailed to client</span></span>
+                  <button type="button" class="btn-expand" onclick="toggleNotesExpand(this)">⤢ Expand</button>
+                </div>
+                <textarea class="needs-input ${cfnHasValue ? 'has-value' : ''}"
+                          id="cfn-${d.id}"
+                          data-deal="${d.id}"
+                          placeholder="Edit the notes above into client-friendly language before sending."
+                          oninput="markNeedsDirty(this)">${esc(d.client_facing_notes)}</textarea>
+                <div class="notes-footer">
+                  <button class="btn-submit ${notesStatusCls}" id="notesbtn-${d.id}"
+                          onclick="submitNotes('${d.id}')">
+                    ${d.client_facing_notes ? '✓ Saved' : 'Save Notes'}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="step-box">
+              <span class="step-label">Step 5 (send prep notes to client)</span>
+              <div class="notes-footer">
+                <button class="btn-invite ${sentCls}" id="sendemail-${d.id}"
+                        onclick="openSendEmailModal('${d.id}')">
+                  ${d.prep_email_sent ? '✓ Sent' : 'Send Prep Email'}
+                </button>
+              </div>
+            </div>
+            <div class="step-box">
+              <span class="step-label">Step 6 (send handoff email to customer)</span>
+              <div class="notes-footer">
+                <button class="btn-invite ${handoffSentCls}" id="handoff-${d.id}"
+                        onclick="openSendHandoffModal('${d.id}')">
+                  ${d.handoff_email_sent ? '✓ Sent' : 'Send Handoff Email'}
+                </button>
+              </div>
+            </div>
+            <div class="step-box">
+              <span class="step-label">Step 7 (archive the meeting)</span>
+              <div class="notes-footer">
+                ${d.archived
+                  ? `<div style="display:flex; align-items:center; gap:12px;">
+                       <span class="archived-badge">Archived ${esc(d.archived_at)}</span>
+                       <button class="btn-unarchive" id="archive-${d.id}" onclick="unarchiveDeal('${d.id}')">↩ Unarchive</button>
+                     </div>`
+                  : `<button class="btn-archive" id="archive-${d.id}" onclick="archiveDeal('${d.id}')">🗄 Archive Meeting</button>`
+                }
+              </div>
             </div>
           </div>
-          <div class="step-box">
-            <span class="step-label">Step 6 (send handoff email to customer)</span>
-            <div class="notes-footer">
-              <button class="btn-invite ${handoffSentCls}" id="handoff-${d.id}"
-                      onclick="openSendHandoffModal('${d.id}')">
-                ${d.handoff_email_sent ? '✓ Sent' : 'Send Handoff Email'}
-              </button>
+        </div>
+        <div class="step-box step3-full">
+          <span class="step-label">Step 3 (add the team to the meeting invite)</span>
+          <div class="step3-row">
+            <div class="step3-main">
+              <div class="meeting-row">
+                <div class="meeting-group" id="meetinggroup-${d.id}">
+                  <span class="meeting-label">Add Team to Calendar Invite</span>
+                  <button type="button" class="meeting-trigger ${meetingTriggerCls}" id="meetingtrigger-${d.id}"
+                          onclick="toggleMeetingDropdown('${d.id}')">
+                    <span class="trigger-text" id="meetingtext-${d.id}">${esc(meetingText)}</span>
+                    ${suggestedMeeting ? '<span class="suggested-badge">Suggested — confirm</span>' : ''}
+                    <span class="trigger-arrow">▼</span>
+                  </button>
+                  <div class="meeting-dropdown" id="meetingdrop-${d.id}">
+                    <input class="meeting-dropdown-search" type="text" placeholder="Search meetings…"
+                           oninput="filterMeetingOptions('${d.id}', this.value)"
+                           onclick="event.stopPropagation()" />
+                    <div class="meeting-list" id="meetinglist-${d.id}">
+                      ${allMeetings.length
+                        ? allMeetings.map(m => `
+                          <div class="meeting-option" data-id="${esc(m.id)}" data-label="${esc(m.label)}"
+                               onclick="selectMeeting('${d.id}', this)">
+                            ${esc(m.label)}
+                          </div>`).join('')
+                        : '<div class="meeting-empty">No meetings found</div>'
+                      }
+                    </div>
+                  </div>
+                  <input type="hidden" id="meeting-${d.id}" value="${esc(meetingValue)}" />
+                </div>
+                <button class="btn-invite ${inviteStatusCls}" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
+                  ${d.meeting_id ? '✓ Added' : 'Add to Invite'}
+                </button>
+              </div>
             </div>
-          </div>
-          <div class="step-box">
-            <span class="step-label">Step 7 (archive the meeting)</span>
-            <div class="notes-footer">
-              ${d.archived
-                ? `<div style="display:flex; align-items:center; gap:12px;">
-                     <span class="archived-badge">Archived ${esc(d.archived_at)}</span>
-                     <button class="btn-unarchive" id="archive-${d.id}" onclick="unarchiveDeal('${d.id}')">↩ Unarchive</button>
-                   </div>`
-                : `<button class="btn-archive" id="archive-${d.id}" onclick="archiveDeal('${d.id}')">🗄 Archive Meeting</button>`
-              }
+            <div class="conflict-panel">
+              <span class="conflict-panel-label">Other Meetings At This Time</span>
+              <div class="conflict-list">${conflictsHtml}</div>
             </div>
           </div>
         </div>
