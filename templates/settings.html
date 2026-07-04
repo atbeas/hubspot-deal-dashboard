@@ -108,6 +108,19 @@
     .email-template-input.dirty { border-color: #fcd34d; background: #fffbeb; }
     .template-footer { display: flex; justify-content: flex-end; margin-top: 10px; }
 
+    .template-calendar-picker {
+      display: flex; align-items: center; gap: 10px; margin-top: 12px;
+    }
+    .template-calendar-picker label { font-size: .82rem; font-weight: 600; color: #6b7280; }
+    .template-calendar-picker select {
+      padding: 7px 12px; border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: .86rem; font-family: inherit; color: #1a1a2e; background: #fff;
+      outline: none; cursor: pointer;
+    }
+    .template-calendar-picker select:focus { border-color: #ff5c35; }
+    .template-subhead { font-size: .95rem; font-weight: 700; color: #1a1a2e; margin: 28px 0 4px; }
+    .template-subhead:first-of-type { margin-top: 16px; }
+
     #toast {
       position: fixed; bottom: 24px; right: 24px;
       background: #1a1a2e; color: #fff; padding: 11px 18px;
@@ -207,9 +220,20 @@
   </div>
 
   <div class="page-header section-gap">
-    <h2>Prep Email Template</h2>
-    <p>This intro text is prepended to the Client-Facing Notes when sending the "Send Prep Email" from a deal card. It can still be edited per-email before sending.</p>
+    <h2>Email Templates</h2>
+    <p>Each connected calendar has its own Prep and Handoff email templates, since every calendar represents a separate client-facing brand. Pick a calendar below to view or edit its templates.</p>
+    <div class="template-calendar-picker">
+      <label for="templateCalendarSelect">Editing templates for</label>
+      <select id="templateCalendarSelect" onchange="onTemplateCalendarChange()">
+        {% for cal in connected_calendars %}
+        <option value="{{ cal.email }}" {{ 'selected' if cal.email == default_calendar }}>{{ cal.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
   </div>
+
+  <div class="template-subhead">Prep Email Template</div>
+  <p style="font-size:.85rem; color:#6b7280; margin-bottom:10px;">This intro text is prepended to the Client-Facing Notes when sending the "Send Prep Email" from a deal card. Always sent from Runway Selling regardless of calendar. Only available once Step 3 (add the team to the meeting invite) is complete on a deal. Can still be edited per-email before sending.</p>
 
   <textarea id="emailTemplateInput" class="email-template-input"
             oninput="markTemplateDirty()">{{ email_template }}</textarea>
@@ -217,10 +241,8 @@
     <button class="btn-save" id="templateSaveBtn" onclick="saveEmailTemplate()">Save</button>
   </div>
 
-  <div class="page-header section-gap">
-    <h2>Handoff Email Template</h2>
-    <p>Sent from scheduling@10talent.tech to the customer (from the original booking), CC'ing the Account Manager and Sales Executive, to introduce their team. This email does not include the client-facing notes — template only. Use <code>[[first_name]]</code>, <code>[[account_manager]]</code>, and <code>[[sales_executive]]</code> as placeholders — they're replaced with the customer's first name and the assigned names before sending. Editable per-email before sending.</p>
-  </div>
+  <div class="template-subhead">Handoff Email Template</div>
+  <p style="font-size:.85rem; color:#6b7280; margin-bottom:10px;">Sent to the customer (from the original booking) from whichever calendar mailbox the deal's meeting was actually booked on — matching the calendar picked above — CC'ing the Account Manager and Sales Executive, to introduce their team. Only available once Step 3 is complete on a deal. This email does not include the client-facing notes — template only. Use <code>[[first_name]]</code>, <code>[[account_manager]]</code>, and <code>[[sales_executive]]</code> as placeholders — they're replaced with the customer's first name and the assigned names before sending. Editable per-email before sending.</p>
 
   <textarea id="handoffTemplateInput" class="email-template-input"
             oninput="markHandoffTemplateDirty()">{{ handoff_email_template }}</textarea>
@@ -301,6 +323,39 @@
     }
   }
 
+  let currentTemplateCalendar = document.getElementById('templateCalendarSelect').value;
+
+  async function onTemplateCalendarChange() {
+    currentTemplateCalendar = document.getElementById('templateCalendarSelect').value;
+    await Promise.all([loadPrepTemplate(), loadHandoffTemplate()]);
+  }
+
+  async function loadPrepTemplate() {
+    const input = document.getElementById('emailTemplateInput');
+    const btn = document.getElementById('templateSaveBtn');
+    try {
+      const r = await fetch(`/api/settings/email-template?calendar=${encodeURIComponent(currentTemplateCalendar)}`);
+      const d = await r.json();
+      input.value = d.template || '';
+    } catch (e) { /* keep whatever was there */ }
+    input.classList.remove('dirty');
+    btn.textContent = 'Save';
+    btn.classList.remove('saved');
+  }
+
+  async function loadHandoffTemplate() {
+    const input = document.getElementById('handoffTemplateInput');
+    const btn = document.getElementById('handoffTemplateSaveBtn');
+    try {
+      const r = await fetch(`/api/settings/handoff-email-template?calendar=${encodeURIComponent(currentTemplateCalendar)}`);
+      const d = await r.json();
+      input.value = d.template || '';
+    } catch (e) { /* keep whatever was there */ }
+    input.classList.remove('dirty');
+    btn.textContent = 'Save';
+    btn.classList.remove('saved');
+  }
+
   function markTemplateDirty() {
     const input = document.getElementById('emailTemplateInput');
     input.classList.add('dirty');
@@ -318,7 +373,7 @@
       const resp = await fetch('/api/settings/email-template', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ template: input.value }),
+        body: JSON.stringify({ template: input.value, calendar: currentTemplateCalendar }),
       });
       if (!resp.ok) throw new Error('Save failed');
       input.classList.remove('dirty');
@@ -350,7 +405,7 @@
       const resp = await fetch('/api/settings/handoff-email-template', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ template: input.value }),
+        body: JSON.stringify({ template: input.value, calendar: currentTemplateCalendar }),
       });
       if (!resp.ok) throw new Error('Save failed');
       input.classList.remove('dirty');

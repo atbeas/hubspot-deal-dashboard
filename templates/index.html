@@ -836,21 +836,22 @@
   });
 
   let _pendingEmail = null; // { dealId, btn }
-  let _emailTemplateCache = null;
+  let _emailTemplateCache = {}; // keyed by calendar email — templates differ per calendar
 
-  async function getEmailTemplate() {
-    if (_emailTemplateCache !== null) return _emailTemplateCache;
+  async function getEmailTemplate(calendarEmail) {
+    if (_emailTemplateCache[calendarEmail] !== undefined) return _emailTemplateCache[calendarEmail];
     try {
-      const r = await fetch('/api/settings/email-template');
+      const r = await fetch(`/api/settings/email-template?calendar=${encodeURIComponent(calendarEmail)}`);
       const d = await r.json();
-      _emailTemplateCache = d.template || '';
-    } catch (e) { _emailTemplateCache = ''; }
-    return _emailTemplateCache;
+      _emailTemplateCache[calendarEmail] = d.template || '';
+    } catch (e) { _emailTemplateCache[calendarEmail] = ''; }
+    return _emailTemplateCache[calendarEmail];
   }
 
   async function openSendEmailModal(dealId) {
     const deal = allDeals.find(d => d.id === dealId);
     if (!deal) return;
+    if (!deal.meeting_id) return showToast('Complete Step 3 (add the team to the meeting invite) first', true);
 
     const cfnTextarea = document.getElementById(`cfn-${dealId}`);
     if (cfnTextarea && cfnTextarea.classList.contains('dirty')) {
@@ -879,7 +880,7 @@
       .map(role => allOwners.find(o => o.id === roles[role])?.email)
       .filter(Boolean);
 
-    const template = await getEmailTemplate();
+    const template = await getEmailTemplate(deal.meeting_calendar);
     const clientLabel = CLIENT_OPTIONS.find(o => o.value === clientValue)?.label || deal.name;
 
     const toContainer = document.getElementById('emailModalTo');
@@ -959,21 +960,22 @@
   });
 
   let _pendingHandoff = null; // { dealId, btn }
-  let _handoffTemplateCache = null;
+  let _handoffTemplateCache = {}; // keyed by calendar email — templates differ per calendar
 
-  async function getHandoffEmailTemplate() {
-    if (_handoffTemplateCache !== null) return _handoffTemplateCache;
+  async function getHandoffEmailTemplate(calendarEmail) {
+    if (_handoffTemplateCache[calendarEmail] !== undefined) return _handoffTemplateCache[calendarEmail];
     try {
-      const r = await fetch('/api/settings/handoff-email-template');
+      const r = await fetch(`/api/settings/handoff-email-template?calendar=${encodeURIComponent(calendarEmail)}`);
       const d = await r.json();
-      _handoffTemplateCache = d.template || '';
-    } catch (e) { _handoffTemplateCache = ''; }
-    return _handoffTemplateCache;
+      _handoffTemplateCache[calendarEmail] = d.template || '';
+    } catch (e) { _handoffTemplateCache[calendarEmail] = ''; }
+    return _handoffTemplateCache[calendarEmail];
   }
 
   async function openSendHandoffModal(dealId) {
     const deal = allDeals.find(d => d.id === dealId);
     if (!deal) return;
+    if (!deal.meeting_id) return showToast('Complete Step 3 (add the team to the meeting invite) first', true);
 
     const card = document.getElementById(`card-${dealId}`);
     const selects = card.querySelectorAll('select.role-select');
@@ -996,13 +998,14 @@
       .map(role => allOwners.find(o => o.id === roles[role])?.email)
       .filter(Boolean);
 
-    const template = await getHandoffEmailTemplate();
+    const template = await getHandoffEmailTemplate(deal.meeting_calendar);
     const body = template
       .replaceAll('[[first_name]]', customerFirstName || 'there')
       .replaceAll('[[account_manager]]', amName)
       .replaceAll('[[sales_executive]]', seName);
 
     const prospectCompany = (deal.name || '').split('|')[0].trim();
+    const brandLabel = calendarLabel(deal.meeting_calendar);
 
     const toContainer = document.getElementById('handoffModalTo');
     const ccContainer = document.getElementById('handoffModalCc');
@@ -1012,7 +1015,7 @@
     ccEmails.forEach(e => addChip(ccContainer, e));
     document.getElementById('handoffExtraTo').value = '';
     document.getElementById('handoffExtraCc').value = '';
-    document.getElementById('handoffModalSubject').value = `10talent Tech | Introducing your Team | ${prospectCompany}`;
+    document.getElementById('handoffModalSubject').value = `${brandLabel} | Introducing your Team | ${prospectCompany}`;
     document.getElementById('handoffModalBody').value = body;
 
     _pendingHandoff = { dealId, btn: document.getElementById(`handoff-${dealId}`) };
@@ -1309,7 +1312,8 @@
               <span class="step-label">Step 5 (send prep notes to client)</span>
               <div class="notes-footer">
                 <button class="btn-invite ${sentCls}" id="sendemail-${d.id}"
-                        onclick="openSendEmailModal('${d.id}')">
+                        onclick="openSendEmailModal('${d.id}')"
+                        ${!d.meeting_id ? 'disabled title="Complete Step 3 (add the team to the meeting invite) first"' : ''}>
                   ${d.prep_email_sent ? '✓ Sent' : 'Send Prep Email'}
                 </button>
               </div>
@@ -1318,7 +1322,8 @@
               <span class="step-label">Step 6 (send handoff email to customer)</span>
               <div class="notes-footer">
                 <button class="btn-invite ${handoffSentCls}" id="handoff-${d.id}"
-                        onclick="openSendHandoffModal('${d.id}')">
+                        onclick="openSendHandoffModal('${d.id}')"
+                        ${!d.meeting_id ? 'disabled title="Complete Step 3 (add the team to the meeting invite) first"' : ''}>
                   ${d.handoff_email_sent ? '✓ Sent' : 'Send Handoff Email'}
                 </button>
               </div>

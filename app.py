@@ -130,6 +130,29 @@ def set_setting(key, value):
             ON CONFLICT(key) DO UPDATE SET value = excluded.value
         """, [key, value])
 
+def prep_template_for(calendar_email):
+    # Falls back to the old single global template (pre-multi-calendar) for
+    # the original 10talent calendar only, so nothing already written is lost.
+    legacy = get_setting("email_intro_template", DEFAULT_EMAIL_TEMPLATE) if calendar_email == SCHEDULING_EMAIL else DEFAULT_EMAIL_TEMPLATE
+    return get_setting(f"email_intro_template::{calendar_email}", legacy)
+
+def handoff_template_for(calendar_email):
+    legacy = get_setting("handoff_email_template", DEFAULT_HANDOFF_EMAIL_TEMPLATE) if calendar_email == SCHEDULING_EMAIL else DEFAULT_HANDOFF_EMAIL_TEMPLATE
+    return get_setting(f"handoff_email_template::{calendar_email}", legacy)
+
+def get_confirmed_meeting(deal_id):
+    # A deal has "completed Step 3" only once a meeting has been explicitly
+    # confirmed via Add to Invite — an auto-suggested match doesn't count,
+    # since that's exactly the kind of unconfirmed guess that shouldn't
+    # decide which mailbox a customer-facing email gets sent from.
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT meeting_id, meeting_calendar FROM deal_meeting WHERE deal_id = ?", [deal_id]
+        ).fetchone()
+    if not row or not row["meeting_id"]:
+        return None
+    return {"meeting_id": row["meeting_id"], "calendar": row["meeting_calendar"] or ""}
+
 def get_ms_token():
     resp = requests.post(
         f"https://login.microsoftonline.com/{MS_TENANT_ID}/oauth2/v2.0/token",
@@ -961,20 +984,27 @@ def unarchive_deal(deal_id):
 @app.route("/api/settings/email-template")
 @login_required
 def get_email_template():
-    return jsonify({"template": get_setting("email_intro_template", DEFAULT_EMAIL_TEMPLATE)})
+    calendar = request.args.get("calendar", SCHEDULING_EMAIL)
+    return jsonify({"template": prep_template_for(calendar)})
 
 
 @app.route("/api/settings/email-template", methods=["POST"])
 @login_required
 def set_email_template():
     body = request.get_json()
-    set_setting("email_intro_template", body.get("template", ""))
+    calendar = body.get("calendar", "")
+    if calendar not in {c["email"] for c in CONNECTED_CALENDARS}:
+        return jsonify({"error": "Unknown or missing calendar"}), 400
+    set_setting(f"email_intro_template::{calendar}", body.get("template", ""))
     return jsonify({"ok": True})
 
 
 @app.route("/api/deals/<deal_id>/send-prep-email", methods=["POST"])
 @login_required
 def send_prep_email(deal_id):
+    if not get_confirmed_meeting(deal_id):
+        return jsonify({"error": "Complete Step 3 (add the team to the meeting invite) before sending the prep email"}), 400
+
     body = request.get_json()
     to      = [e for e in body.get("to", []) if e]
     cc      = [e for e in body.get("cc", []) if e]
@@ -1050,20 +1080,34 @@ def get_deal_contact(deal_id):
 @app.route("/api/settings/handoff-email-template")
 @login_required
 def get_handoff_email_template():
-    return jsonify({"template": get_setting("handoff_email_template", DEFAULT_HANDOFF_EMAIL_TEMPLATE)})
+    calendar = request.args.get("calendar", SCHEDULING_EMAIL)
+    return jsonify({"template": handoff_template_for(calendar)})
 
 
 @app.route("/api/settings/handoff-email-template", methods=["POST"])
 @login_required
 def set_handoff_email_template():
     body = request.get_json()
-    set_setting("handoff_email_template", body.get("template", ""))
+    calendar = body.get("calendar", "")
+    if calendar not in {c["email"] for c in CONNECTED_CALENDARS}:
+        return jsonify({"error": "Unknown or missing calendar"}), 400
+    set_setting(f"handoff_email_template::{calendar}", body.get("template", ""))
     return jsonify({"ok": True})
 
 
 @app.route("/api/deals/<deal_id>/send-handoff-email", methods=["POST"])
 @login_required
 def send_handoff_email(deal_id):
+    meeting = get_confirmed_meeting(deal_id)
+    if not meeting:
+        return jsonify({"error": "Complete Step 3 (add the team to the meeting invite) before sending the handoff email"}), 400
+    # Customer-facing, so it needs to come from whichever calendar mailbox
+    # the meeting was actually booked on — not a fixed address — to match
+    # the brand the customer already booked/received a calendar invite from.
+    from_calendar = meeting["calendar"]
+    if from_calendar not in {c["email"] for c in CONNECTED_CALENDARS}:
+        return jsonify({"error": "Could not determine which calendar this meeting is on"}), 400
+
     body = request.get_json()
     to      = [e for e in body.get("to", []) if e]
     cc      = [e for e in body.get("cc", []) if e]
@@ -1088,7 +1132,7 @@ def send_handoff_email(deal_id):
         message["ccRecipients"] = [{"emailAddress": {"address": e}} for e in cc]
 
     resp = requests.post(
-        f"https://graph.microsoft.com/v1.0/users/{SCHEDULING_EMAIL}/sendMail",
+        f"https://graph.microsoft.com/v1.0/users/{from_calendar}/sendMail",
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         json={"message": message, "saveToSentItems": "true"},
     )
@@ -1136,13 +1180,16 @@ def settings():
         o["eligible_se"] = e["se"]
         o["eligible_sd"] = e["sd"]
 
-    email_template = get_setting("email_intro_template", DEFAULT_EMAIL_TEMPLATE)
-    handoff_email_template = get_setting("handoff_email_template", DEFAULT_HANDOFF_EMAIL_TEMPLATE)
+    default_calendar = CONNECTED_CALENDARS[0]["email"] if CONNECTED_CALENDARS else ""
+    email_template = prep_template_for(default_calendar) if default_calendar else DEFAULT_EMAIL_TEMPLATE
+    handoff_email_template = handoff_template_for(default_calendar) if default_calendar else DEFAULT_HANDOFF_EMAIL_TEMPLATE
 
     return render_template(
         "settings.html",
         client_options=client_options,
         owners=owners,
+        connected_calendars=CONNECTED_CALENDARS,
+        default_calendar=default_calendar,
         email_template=email_template,
         handoff_email_template=handoff_email_template,
     )
