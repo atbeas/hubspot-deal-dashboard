@@ -837,6 +837,7 @@
 
   let _pendingEmail = null; // { dealId, btn }
   let _emailTemplateCache = {}; // keyed by calendar email — templates differ per calendar
+  let _emailSubjectCache = {}; // keyed by calendar email — subject templates differ per calendar
 
   async function getEmailTemplate(calendarEmail) {
     if (_emailTemplateCache[calendarEmail] !== undefined) return _emailTemplateCache[calendarEmail];
@@ -846,6 +847,16 @@
       _emailTemplateCache[calendarEmail] = d.template || '';
     } catch (e) { _emailTemplateCache[calendarEmail] = ''; }
     return _emailTemplateCache[calendarEmail];
+  }
+
+  async function getEmailSubjectTemplate(calendarEmail) {
+    if (_emailSubjectCache[calendarEmail] !== undefined) return _emailSubjectCache[calendarEmail];
+    try {
+      const r = await fetch(`/api/settings/email-subject?calendar=${encodeURIComponent(calendarEmail)}`);
+      const d = await r.json();
+      _emailSubjectCache[calendarEmail] = d.subject || '';
+    } catch (e) { _emailSubjectCache[calendarEmail] = ''; }
+    return _emailSubjectCache[calendarEmail];
   }
 
   async function openSendEmailModal(dealId) {
@@ -881,6 +892,7 @@
       .filter(Boolean);
 
     const template = await getEmailTemplate(deal.meeting_calendar);
+    const subjectTemplate = await getEmailSubjectTemplate(deal.meeting_calendar);
     const clientLabel = CLIENT_OPTIONS.find(o => o.value === clientValue)?.label || deal.name;
 
     const toContainer = document.getElementById('emailModalTo');
@@ -892,7 +904,9 @@
     document.getElementById('emailExtraTo').value = '';
     document.getElementById('emailExtraCc').value = '';
     const prospectCompany = (deal.name || '').split('|')[0].trim();
-    document.getElementById('emailModalSubject').value = `Runway Selling Meeting Notes | ${prospectCompany} | ${clientLabel}`;
+    document.getElementById('emailModalSubject').value = subjectTemplate
+      .replaceAll('[[company]]', prospectCompany)
+      .replaceAll('[[client]]', clientLabel);
     document.getElementById('emailModalBody').value = `${template}\n\n${notes}`;
 
     _pendingEmail = { dealId, btn: document.getElementById(`sendemail-${dealId}`) };
@@ -961,6 +975,7 @@
 
   let _pendingHandoff = null; // { dealId, btn }
   let _handoffTemplateCache = {}; // keyed by calendar email — templates differ per calendar
+  let _handoffSubjectCache = {}; // keyed by calendar email — subject templates differ per calendar
 
   async function getHandoffEmailTemplate(calendarEmail) {
     if (_handoffTemplateCache[calendarEmail] !== undefined) return _handoffTemplateCache[calendarEmail];
@@ -970,6 +985,16 @@
       _handoffTemplateCache[calendarEmail] = d.template || '';
     } catch (e) { _handoffTemplateCache[calendarEmail] = ''; }
     return _handoffTemplateCache[calendarEmail];
+  }
+
+  async function getHandoffSubjectTemplate(calendarEmail) {
+    if (_handoffSubjectCache[calendarEmail] !== undefined) return _handoffSubjectCache[calendarEmail];
+    try {
+      const r = await fetch(`/api/settings/handoff-email-subject?calendar=${encodeURIComponent(calendarEmail)}`);
+      const d = await r.json();
+      _handoffSubjectCache[calendarEmail] = d.subject || '';
+    } catch (e) { _handoffSubjectCache[calendarEmail] = ''; }
+    return _handoffSubjectCache[calendarEmail];
   }
 
   async function openSendHandoffModal(dealId) {
@@ -999,6 +1024,7 @@
       .filter(Boolean);
 
     const template = await getHandoffEmailTemplate(deal.meeting_calendar);
+    const subjectTemplate = await getHandoffSubjectTemplate(deal.meeting_calendar);
     const body = template
       .replaceAll('[[first_name]]', customerFirstName || 'there')
       .replaceAll('[[account_manager]]', amName)
@@ -1015,7 +1041,9 @@
     ccEmails.forEach(e => addChip(ccContainer, e));
     document.getElementById('handoffExtraTo').value = '';
     document.getElementById('handoffExtraCc').value = '';
-    document.getElementById('handoffModalSubject').value = `${brandLabel} | Introducing your Team | ${prospectCompany}`;
+    document.getElementById('handoffModalSubject').value = subjectTemplate
+      .replaceAll('[[company]]', prospectCompany)
+      .replaceAll('[[brand]]', brandLabel);
     document.getElementById('handoffModalBody').value = body;
 
     _pendingHandoff = { dealId, btn: document.getElementById(`handoff-${dealId}`) };

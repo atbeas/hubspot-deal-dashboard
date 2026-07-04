@@ -117,6 +117,8 @@ DEFAULT_HANDOFF_EMAIL_TEMPLATE = (
     "They'll be your main points of contact moving forward and are happy to answer any "
     "questions as we continue working together.\n"
 )
+DEFAULT_EMAIL_SUBJECT_TEMPLATE = "Runway Selling Meeting Notes | [[company]] | [[client]]"
+DEFAULT_HANDOFF_SUBJECT_TEMPLATE = "[[brand]] | Introducing your Team | [[company]]"
 
 def get_setting(key, default=""):
     with get_db() as conn:
@@ -139,6 +141,12 @@ def prep_template_for(calendar_email):
 def handoff_template_for(calendar_email):
     legacy = get_setting("handoff_email_template", DEFAULT_HANDOFF_EMAIL_TEMPLATE) if calendar_email == SCHEDULING_EMAIL else DEFAULT_HANDOFF_EMAIL_TEMPLATE
     return get_setting(f"handoff_email_template::{calendar_email}", legacy)
+
+def prep_subject_for(calendar_email):
+    return get_setting(f"email_intro_subject::{calendar_email}", DEFAULT_EMAIL_SUBJECT_TEMPLATE)
+
+def handoff_subject_for(calendar_email):
+    return get_setting(f"handoff_email_subject::{calendar_email}", DEFAULT_HANDOFF_SUBJECT_TEMPLATE)
 
 def get_confirmed_meeting(deal_id):
     # A deal has "completed Step 3" only once a meeting has been explicitly
@@ -999,6 +1007,24 @@ def set_email_template():
     return jsonify({"ok": True})
 
 
+@app.route("/api/settings/email-subject")
+@login_required
+def get_email_subject():
+    calendar = request.args.get("calendar", SCHEDULING_EMAIL)
+    return jsonify({"subject": prep_subject_for(calendar)})
+
+
+@app.route("/api/settings/email-subject", methods=["POST"])
+@login_required
+def set_email_subject():
+    body = request.get_json()
+    calendar = body.get("calendar", "")
+    if calendar not in {c["email"] for c in CONNECTED_CALENDARS}:
+        return jsonify({"error": "Unknown or missing calendar"}), 400
+    set_setting(f"email_intro_subject::{calendar}", body.get("subject", ""))
+    return jsonify({"ok": True})
+
+
 @app.route("/api/deals/<deal_id>/send-prep-email", methods=["POST"])
 @login_required
 def send_prep_email(deal_id):
@@ -1095,6 +1121,24 @@ def set_handoff_email_template():
     return jsonify({"ok": True})
 
 
+@app.route("/api/settings/handoff-email-subject")
+@login_required
+def get_handoff_email_subject():
+    calendar = request.args.get("calendar", SCHEDULING_EMAIL)
+    return jsonify({"subject": handoff_subject_for(calendar)})
+
+
+@app.route("/api/settings/handoff-email-subject", methods=["POST"])
+@login_required
+def set_handoff_email_subject():
+    body = request.get_json()
+    calendar = body.get("calendar", "")
+    if calendar not in {c["email"] for c in CONNECTED_CALENDARS}:
+        return jsonify({"error": "Unknown or missing calendar"}), 400
+    set_setting(f"handoff_email_subject::{calendar}", body.get("subject", ""))
+    return jsonify({"ok": True})
+
+
 @app.route("/api/deals/<deal_id>/send-handoff-email", methods=["POST"])
 @login_required
 def send_handoff_email(deal_id):
@@ -1183,6 +1227,8 @@ def settings():
     default_calendar = CONNECTED_CALENDARS[0]["email"] if CONNECTED_CALENDARS else ""
     email_template = prep_template_for(default_calendar) if default_calendar else DEFAULT_EMAIL_TEMPLATE
     handoff_email_template = handoff_template_for(default_calendar) if default_calendar else DEFAULT_HANDOFF_EMAIL_TEMPLATE
+    email_subject = prep_subject_for(default_calendar) if default_calendar else DEFAULT_EMAIL_SUBJECT_TEMPLATE
+    handoff_email_subject = handoff_subject_for(default_calendar) if default_calendar else DEFAULT_HANDOFF_SUBJECT_TEMPLATE
 
     return render_template(
         "settings.html",
@@ -1192,6 +1238,8 @@ def settings():
         default_calendar=default_calendar,
         email_template=email_template,
         handoff_email_template=handoff_email_template,
+        email_subject=email_subject,
+        handoff_email_subject=handoff_email_subject,
     )
 
 
