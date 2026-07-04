@@ -5,7 +5,10 @@ import requests
 from functools import wraps
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from werkzeug.security import generate_password_hash, check_password_hash
+
+PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", os.path.dirname(__file__)), "client_contacts.db")
 
@@ -375,8 +378,8 @@ def get_initial_meeting_times(deal_ids):
             continue
         earliest = min(times)
         try:
-            dt = datetime.fromisoformat(earliest.replace("Z", "+00:00"))
-            result[deal_id] = dt.strftime("%b %d, %Y %-I:%M %p")
+            dt = datetime.fromisoformat(earliest.replace("Z", "+00:00")).astimezone(PACIFIC_TZ)
+            result[deal_id] = dt.strftime("%b %d, %Y %-I:%M %p PT")
         except Exception:
             continue
 
