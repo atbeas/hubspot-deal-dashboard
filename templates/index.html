@@ -167,8 +167,13 @@
       transition: border-color .2s; white-space: nowrap; overflow: hidden;
     }
     .meeting-trigger.has-value { color: #e8e9f0; }
+    .meeting-trigger.suggested { border-style: dashed; border-color: #fbbf24; }
     .meeting-trigger:focus, .meeting-trigger.open { border-color: #ff5c35; outline: none; }
     .meeting-trigger .trigger-text { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+    .meeting-trigger .suggested-badge {
+      font-size: .68rem; font-weight: 700; color: #fbbf24; text-transform: uppercase;
+      letter-spacing: .3px; margin-left: 8px; flex-shrink: 0; white-space: nowrap;
+    }
     .meeting-trigger .trigger-arrow { margin-left: 8px; font-size: .7rem; color: #5c607a; flex-shrink: 0; }
     .meeting-dropdown {
       display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
@@ -519,11 +524,17 @@
     empty.style.display = visible ? 'none' : 'block';
   }
 
+  function findSuggestedMeeting(d) {
+    if (!d.initial_meeting_start || !allMeetings.length) return null;
+    return allMeetings.find(m => m.start_utc && m.start_utc === d.initial_meeting_start) || null;
+  }
+
   function selectMeeting(dealId, el) {
     const changed = document.getElementById(`meeting-${dealId}`).value !== el.dataset.id;
     document.getElementById(`meeting-${dealId}`).value        = el.dataset.id;
     document.getElementById(`meetingtext-${dealId}`).textContent = el.dataset.label;
     document.getElementById(`meetingtrigger-${dealId}`).classList.add('has-value');
+    document.getElementById(`meetingtrigger-${dealId}`).classList.remove('suggested');
     document.getElementById(`meetingdrop-${dealId}`).classList.remove('open');
     document.getElementById(`meetingtrigger-${dealId}`).classList.remove('open');
     document.getElementById(`meetinglist-${dealId}`).querySelectorAll('.meeting-option')
@@ -552,6 +563,7 @@
   async function addToInvite(dealId) {
     const eventId = document.getElementById(`meeting-${dealId}`).value;
     if (!eventId) return showToast('Select a meeting first', true);
+    document.getElementById(`meetingtrigger-${dealId}`).classList.remove('suggested');
 
     const card   = document.getElementById(`card-${dealId}`);
     const selects = card.querySelectorAll('select.role-select');
@@ -1033,6 +1045,11 @@
     const needsHasValue = !!d.business_needs;
     const cfnHasValue   = !!d.client_facing_notes;
 
+    const suggestedMeeting = !d.meeting_id ? findSuggestedMeeting(d) : null;
+    const meetingValue = d.meeting_id || (suggestedMeeting ? suggestedMeeting.id : '');
+    const meetingText  = d.meeting_label || (suggestedMeeting ? suggestedMeeting.label : '— Select meeting —');
+    const meetingTriggerCls = d.meeting_id ? 'has-value' : (suggestedMeeting ? 'has-value suggested' : '');
+
     return `
     <div class="card" id="card-${d.id}">
       <div class="card-header">
@@ -1080,9 +1097,10 @@
             <div class="meeting-row">
               <div class="meeting-group" id="meetinggroup-${d.id}">
                 <span class="meeting-label">Add Team to Calendar Invite</span>
-                <button type="button" class="meeting-trigger ${d.meeting_id ? 'has-value' : ''}" id="meetingtrigger-${d.id}"
+                <button type="button" class="meeting-trigger ${meetingTriggerCls}" id="meetingtrigger-${d.id}"
                         onclick="toggleMeetingDropdown('${d.id}')">
-                  <span class="trigger-text" id="meetingtext-${d.id}">${d.meeting_label ? esc(d.meeting_label) : '— Select meeting —'}</span>
+                  <span class="trigger-text" id="meetingtext-${d.id}">${esc(meetingText)}</span>
+                  ${suggestedMeeting ? '<span class="suggested-badge">Suggested — confirm</span>' : ''}
                   <span class="trigger-arrow">▼</span>
                 </button>
                 <div class="meeting-dropdown" id="meetingdrop-${d.id}">
@@ -1100,7 +1118,7 @@
                     }
                   </div>
                 </div>
-                <input type="hidden" id="meeting-${d.id}" value="${d.meeting_id ? esc(d.meeting_id) : ''}" />
+                <input type="hidden" id="meeting-${d.id}" value="${esc(meetingValue)}" />
               </div>
               <button class="btn-invite ${inviteStatusCls}" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
                 ${d.meeting_id ? '✓ Added' : 'Add to Invite'}

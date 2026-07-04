@@ -378,8 +378,11 @@ def get_initial_meeting_times(deal_ids):
             continue
         earliest = min(times)
         try:
-            dt = datetime.fromisoformat(earliest.replace("Z", "+00:00")).astimezone(PACIFIC_TZ)
-            result[deal_id] = dt.strftime("%b %d, %Y %-I:%M %p PT")
+            dt_utc = datetime.fromisoformat(earliest.replace("Z", "+00:00"))
+            result[deal_id] = {
+                "label": dt_utc.astimezone(PACIFIC_TZ).strftime("%b %d, %Y %-I:%M %p PT"),
+                "start_utc": dt_utc.isoformat(),
+            }
         except Exception:
             continue
 
@@ -543,7 +546,8 @@ def get_deals():
             "client_facing_notes": props.get("client_facing_notes") or "",
             "meeting_id":    meeting.get("id", ""),
             "meeting_label": meeting.get("label", ""),
-            "initial_meeting": initial_meeting_times.get(result["id"], ""),
+            "initial_meeting": initial_meeting_times.get(result["id"], {}).get("label", ""),
+            "initial_meeting_start": initial_meeting_times.get(result["id"], {}).get("start_utc", ""),
             "prep_email_sent": result["id"] in prep_emails_sent,
             "handoff_email_sent": result["id"] in handoff_emails_sent,
             "archived":    is_archived,
@@ -775,12 +779,17 @@ def get_meetings():
 
     meetings = []
     for e in resp.json().get("value", []):
+        start_utc = ""
         try:
-            dt = datetime.fromisoformat(e["start"]["dateTime"].replace("Z", "+00:00"))
-            label = f"{e['subject']} — {dt.strftime('%b %d, %Y %-I:%M %p')}"
+            # Graph calendarView returns UTC dateTimes without a "Z" suffix
+            # (confirmed via start.timeZone == "UTC") unless a Prefer header
+            # requests otherwise, so treat the raw value as UTC.
+            dt_utc = datetime.fromisoformat(e["start"]["dateTime"].rstrip("Z")).replace(tzinfo=timezone.utc)
+            start_utc = dt_utc.isoformat()
+            label = f"{e['subject']} — {dt_utc.astimezone(PACIFIC_TZ).strftime('%b %d, %Y %-I:%M %p')} PT"
         except Exception:
             label = e.get("subject", "(No subject)")
-        meetings.append({"id": e["id"], "label": label})
+        meetings.append({"id": e["id"], "label": label, "start_utc": start_utc})
 
     return jsonify({"meetings": meetings})
 
