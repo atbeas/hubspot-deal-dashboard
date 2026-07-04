@@ -235,6 +235,10 @@
     }
     .conflict-item .conflict-meeting { font-weight: 600; color: #e8e9f0; }
     .conflict-item .conflict-deal { color: #8b8fa8; margin-bottom: 2px; }
+    .conflict-archived-tag {
+      font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
+      color: #8b8fa8; background: rgba(139,143,168,.15); border-radius: 4px; padding: 1px 5px;
+    }
     .conflict-role-line { color: #c9cad8; }
     .conflict-role-line .role-empty { color: #5c607a; }
     .conflict-role-warning { color: #f87171; font-weight: 700; }
@@ -487,6 +491,7 @@
   });
   let allOwners   = [];
   let allDeals    = [];
+  let otherBucketDeals = []; // opposite archived/active bucket, same date range — conflict-check lookup only
   let showArchived = false;
   let allMeetings = [];
 
@@ -613,8 +618,12 @@
     if (!myStart) return [];
     const myMeetingId = getDealMeetingId(d);
     const others = allMeetings.filter(m => m.start_utc === myStart && m.id !== myMeetingId);
+    // Search active + archived deals for the same date range so a meeting
+    // that's still on the calendar but whose deal got archived can still
+    // surface its Client/AM/SE instead of showing as unlinked.
+    const candidateDeals = allDeals.concat(otherBucketDeals);
     return others.map(m => {
-      const otherDeal = allDeals.find(o => o.id !== d.id && getDealMeetingId(o) === m.id);
+      const otherDeal = candidateDeals.find(o => o.id !== d.id && getDealMeetingId(o) === m.id);
       const roleMatches = otherDeal
         ? Object.keys(CONFLICT_ROLE_LABELS).filter(role => d[role] && otherDeal[role] && d[role] === otherDeal[role])
         : [];
@@ -639,10 +648,13 @@
         const display = val ? esc(val) : '<span class="role-empty">— unassigned —</span>';
         return `<div class="${cls}">${isMatch ? '⚠ ' : ''}${CONFLICT_ROLE_LABELS[role]}: ${display}</div>`;
       }).join('');
+      const dealLine = c.otherDeal
+        ? `<div class="conflict-deal">${esc(c.otherDeal.name)}${c.otherDeal.archived ? ' <span class="conflict-archived-tag">Archived</span>' : ''}</div>`
+        : '<div class="conflict-deal">(not linked to a loaded deal)</div>';
       return `
         <div class="conflict-item">
           <div class="conflict-meeting">${esc(c.meeting.label)}</div>
-          ${c.otherDeal ? `<div class="conflict-deal">${esc(c.otherDeal.name)}</div>` : '<div class="conflict-deal">(not linked to a loaded deal)</div>'}
+          ${dealLine}
           ${c.otherDeal ? roleLines : ''}
         </div>`;
     }).join('');
@@ -1054,16 +1066,30 @@
     document.getElementById('statsBar').style.display = 'none';
 
     const params = new URLSearchParams({ start, end, archived: showArchived });
+    // Also pull the opposite bucket (archived deals when viewing active, and
+    // vice versa) for the same date range — not shown as cards, only used so
+    // the Step 3 conflict check can see people assigned on archived meetings
+    // that still occupy the same calendar slot.
+    const otherParams = new URLSearchParams({ start, end, archived: !showArchived });
 
     try {
-      const [dealsResp] = await Promise.all([
+      const [dealsResp, otherResp] = await Promise.all([
         fetch(`/api/deals?${params}`),
+        fetch(`/api/deals?${otherParams}`),
         allOwners.length   ? Promise.resolve() : loadOwners(),
         allMeetings.length ? Promise.resolve() : loadMeetings(),
       ]);
       const data = await dealsResp.json();
       if (!dealsResp.ok) throw new Error(data.error || 'Failed to load deals');
       allDeals = data.deals;
+
+      try {
+        const otherData = await otherResp.json();
+        otherBucketDeals = otherResp.ok ? otherData.deals : [];
+      } catch(e) {
+        otherBucketDeals = [];
+      }
+
       document.getElementById('totalLabel').textContent =
         `${data.total} ${showArchived ? 'archived meeting' : 'deal'}${data.total !== 1 ? 's' : ''} in range`;
       render();
