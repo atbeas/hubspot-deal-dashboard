@@ -341,6 +341,26 @@ def get_initial_meeting_times(deal_ids):
     if not contact_ids:
         return {}
 
+    contact_booking_links = {}
+    for chunk in _chunks(contact_ids, 100):
+        resp = requests.post(
+            f"{BASE_URL}/crm/v3/objects/contacts/batch/read",
+            headers=HEADERS,
+            json={
+                "properties": ["first_conversion_event_name", "recent_conversion_event_name"],
+                "inputs": [{"id": c} for c in chunk],
+            },
+        )
+        if not resp.ok:
+            continue
+        for r in resp.json().get("results", []):
+            props = r.get("properties", {})
+            for field in ("first_conversion_event_name", "recent_conversion_event_name"):
+                val = props.get(field) or ""
+                if val.startswith("Meetings Link: "):
+                    contact_booking_links[r["id"]] = val[len("Meetings Link: "):]
+                    break
+
     contact_to_meetings = {}
     for chunk in _chunks(contact_ids, 100):
         resp = requests.post(
@@ -385,6 +405,7 @@ def get_initial_meeting_times(deal_ids):
                 # Only one calendar is wired up today; once more are added, this
                 # should reflect whichever calendar the meeting was actually found on.
                 "calendar": SCHEDULING_EMAIL,
+                "booking_link": contact_booking_links.get(contact_id, ""),
             }
         except Exception:
             continue
@@ -552,6 +573,7 @@ def get_deals():
             "initial_meeting": initial_meeting_times.get(result["id"], {}).get("label", ""),
             "initial_meeting_start": initial_meeting_times.get(result["id"], {}).get("start_utc", ""),
             "initial_meeting_calendar": initial_meeting_times.get(result["id"], {}).get("calendar", ""),
+            "initial_meeting_booking_link": initial_meeting_times.get(result["id"], {}).get("booking_link", ""),
             "prep_email_sent": result["id"] in prep_emails_sent,
             "handoff_email_sent": result["id"] in handoff_emails_sent,
             "archived":    is_archived,
