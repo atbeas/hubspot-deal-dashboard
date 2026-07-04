@@ -988,7 +988,21 @@
       <div class="card-main">
         <div class="card-left">
           <div class="step-box">
-            <span class="step-label">Step 1 (assign the right team to the deal)</span>
+            <span class="step-label">Step 1 (review SD Notes)</span>
+            <div class="note-block">
+              <div class="notes-label-row">
+                <span class="notes-label">Deal Notes <span>· business_needs</span></span>
+                <button type="button" class="btn-expand" onclick="toggleNotesExpand(this)">⤢ Expand</button>
+              </div>
+              <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
+                        id="needs-${d.id}"
+                        data-deal="${d.id}"
+                        placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
+                        oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
+            </div>
+          </div>
+          <div class="step-box">
+            <span class="step-label">Step 2 (assign the right team to the deal)</span>
             <div class="role-grid">
               ${dropdowns}
             </div>
@@ -1000,7 +1014,7 @@
             </div>
           </div>
           <div class="step-box">
-            <span class="step-label">Step 2 (add the team to the meeting invite)</span>
+            <span class="step-label">Step 3 (add the team to the meeting invite)</span>
             <div class="meeting-row">
               <div class="meeting-group" id="meetinggroup-${d.id}">
                 <span class="meeting-label">Add Team to Calendar Invite</span>
@@ -1033,20 +1047,6 @@
           </div>
         </div>
         <div class="card-right">
-          <div class="step-box">
-            <span class="step-label">Step 3 (review SD Notes)</span>
-            <div class="note-block">
-              <div class="notes-label-row">
-                <span class="notes-label">Deal Notes <span>· business_needs</span></span>
-                <button type="button" class="btn-expand" onclick="toggleNotesExpand(this)">⤢ Expand</button>
-              </div>
-              <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
-                        id="needs-${d.id}"
-                        data-deal="${d.id}"
-                        placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
-                        oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
-            </div>
-          </div>
           <div class="step-box">
             <span class="step-label">Step 4 (edit the meeting notes for the client)</span>
             <div class="note-block">
