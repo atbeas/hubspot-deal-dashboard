@@ -15,7 +15,7 @@
       padding: 16px 32px; display: flex; align-items: center; gap: 14px;
       border-bottom: 1px solid #2a2d3e; box-shadow: 0 2px 12px rgba(0,0,0,.4);
     }
-    .header-logo { font-size: .75rem; font-weight: 800; color: #ff5c35; letter-spacing: .5px; text-transform: uppercase; line-height: 1.2; }
+    .header-logo { height: 34px; width: auto; filter: brightness(0) invert(1); }
     header h1 { font-size: 1.15rem; font-weight: 700; color: #e8e9f0; }
     header p  { font-size: .82rem; color: #8b8fa8; margin-top: 2px; }
     .header-nav { margin-left: auto; display: flex; gap: 10px; align-items: center; }
@@ -286,7 +286,7 @@
 <body>
 
 <header>
-  <div class="header-logo">Runway<br>Selling</div>
+  <img class="header-logo" src="{{ url_for('static', filename='runway_logo.png') }}" alt="Runway Selling" />
   <div>
     <h1>Deal Allocation Dashboard</h1>
     <p>Assign Client, Sales Development, Account Manager, and Sales Executive to new deals</p>
