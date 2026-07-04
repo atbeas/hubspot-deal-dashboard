@@ -227,6 +227,11 @@ def set_company_password(company, password):
             ON CONFLICT(company_key) DO UPDATE SET password_hash = excluded.password_hash
         """, [company, password_hash])
 
+# Pipelines the main dashboard pulls deals from: the standard SD pipeline
+# plus Runway Selling's own new-client pipeline (own brand's deals don't
+# funnel through the outsourced-SD "1 SD New Deal Pipeline").
+DASHBOARD_PIPELINES = ["default", "77097563"]
+
 # Real HubSpot deal property names
 ROLE_PROPS = {
     "client": "rs_partner",                # enumeration — client/partner name
@@ -519,7 +524,7 @@ def get_deals():
     filters = [
         {"propertyName": "createdate", "operator": "GTE", "value": str(start_ms)},
         {"propertyName": "createdate", "operator": "LTE", "value": str(end_ms)},
-        {"propertyName": "pipeline",   "operator": "EQ",  "value": "default"},
+        {"propertyName": "pipeline",   "operator": "IN",  "values": DASHBOARD_PIPELINES},
     ]
 
     payload = {
