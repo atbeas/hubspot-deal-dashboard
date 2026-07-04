@@ -99,7 +99,7 @@ SCHEDULING_EMAIL = "scheduling@10talent.tech"
 # Add an entry here when a new calendar is wired up.
 CONNECTED_CALENDARS = [
     {"email": SCHEDULING_EMAIL, "label": "10talent Tech Scheduling"},
-    {"email": "info@runwayselling.com", "label": "Runway Selling Scheduling"},
+    {"email": "info@runwayselling.com", "label": "Runway Selling"},
 ]
 PREP_EMAIL_FROM  = "info@runwayselling.com"
 SEND_CONFIRM_BCC = "info@runwayselling.com"
