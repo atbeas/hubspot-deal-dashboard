@@ -513,11 +513,13 @@ QUICK_NOTES_COMPANIES = {
         "label": "ZAP",
         "owner_id": "89539474",
         "sd_id": "84551230",
+        "booking_link": "https://meetings.hubspot.com/10talent",
     },
     "biznatron": {
         "label": "Biznatron",
         "owner_id": "89539474",
         "sd_id": "91889388",
+        "booking_link": "https://meetings.hubspot.com/10talent/b",
     },
 }
 
@@ -540,7 +542,12 @@ def quick_notes(company):
     cfg = QUICK_NOTES_COMPANIES.get(company)
     if not cfg:
         return "Unknown company", 404
-    return render_template("quick_notes.html", company=company, company_label=cfg["label"])
+    return render_template(
+        "quick_notes.html",
+        company=company,
+        company_label=cfg["label"],
+        booking_link=cfg.get("booking_link", ""),
+    )
 
 
 @app.route("/api/quick-notes/<company>")
