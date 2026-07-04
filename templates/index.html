@@ -365,6 +365,47 @@
   </div>
 </div>
 
+<!-- Send handoff email confirmation modal -->
+<div id="handoffModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:200; align-items:center; justify-content:center;">
+  <div style="background:#1e2030; border:1px solid #2a2d3e; border-radius:14px; padding:28px 32px; max-width:560px; width:92%; max-height:88vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,.6);">
+    <h2 style="font-size:1rem; font-weight:700; margin-bottom:6px; color:#e8e9f0;">Send Handoff Email</h2>
+    <p style="font-size:.83rem; color:#8b8fa8; margin-bottom:18px;">Introduces the Account Manager and Sales Executive to the customer. Review before sending — this goes straight to the customer's inbox.</p>
+
+    <label style="font-size:.73rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#8b8fa8;">To (Customer)</label>
+    <div id="handoffModalTo" style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 10px;"></div>
+    <div style="display:flex; gap:8px; margin-bottom:16px;">
+      <input id="handoffExtraTo" type="email" placeholder="Add another email…"
+             style="flex:1; padding:7px 10px; border:1px solid #2a2d3e; border-radius:6px; font-size:.86rem; font-family:inherit; outline:none; background:#252839; color:#e8e9f0;" />
+      <button onclick="handoffModalAddExtra('to')"
+              style="padding:7px 14px; border-radius:6px; border:1px solid #2a2d3e; background:#252839; color:#c9cad8; font-size:.86rem; font-weight:600; cursor:pointer;">Add</button>
+    </div>
+
+    <label style="font-size:.73rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#8b8fa8;">CC (Account Manager / Sales Executive)</label>
+    <div id="handoffModalCc" style="display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 10px;"></div>
+    <div style="display:flex; gap:8px; margin-bottom:16px;">
+      <input id="handoffExtraCc" type="email" placeholder="Add another email…"
+             style="flex:1; padding:7px 10px; border:1px solid #2a2d3e; border-radius:6px; font-size:.86rem; font-family:inherit; outline:none; background:#252839; color:#e8e9f0;" />
+      <button onclick="handoffModalAddExtra('cc')"
+              style="padding:7px 14px; border-radius:6px; border:1px solid #2a2d3e; background:#252839; color:#c9cad8; font-size:.86rem; font-weight:600; cursor:pointer;">Add</button>
+    </div>
+
+    <label style="font-size:.73rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#8b8fa8;">Subject</label>
+    <input id="handoffModalSubject" type="text"
+           style="width:100%; padding:8px 10px; margin:8px 0 16px; border:1px solid #2a2d3e; border-radius:6px; font-size:.86rem; font-family:inherit; outline:none; background:#252839; color:#e8e9f0;" />
+
+    <label style="font-size:.73rem; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#8b8fa8;">Message</label>
+    <textarea id="handoffModalBody" rows="8"
+              style="width:100%; padding:10px; margin:8px 0 18px; border:1px solid #2a2d3e; border-radius:6px; font-size:.86rem; font-family:inherit; outline:none; background:#252839; color:#e8e9f0; resize:vertical;"></textarea>
+
+    <div style="display:flex; gap:10px; justify-content:flex-end;">
+      <button onclick="closeHandoffModal()"
+              style="padding:9px 20px; border-radius:7px; border:1px solid #2a2d3e; background:#252839; color:#c9cad8; font-size:.88rem; font-weight:600; cursor:pointer;">Cancel</button>
+      <button id="handoffModalSendBtn" onclick="confirmSendHandoff()"
+              style="padding:9px 20px; border-radius:7px; border:none; background:#2563eb; color:#fff; font-size:.88rem; font-weight:600; cursor:pointer;">Send Email</button>
+    </div>
+  </div>
+</div>
+
 <script>
   function toggleSD(e) {
     e.stopPropagation();
@@ -709,6 +750,124 @@
     if (e.target === document.getElementById('emailModal')) closeEmailModal();
   });
 
+  let _pendingHandoff = null; // { dealId, btn }
+  let _handoffTemplateCache = null;
+
+  async function getHandoffEmailTemplate() {
+    if (_handoffTemplateCache !== null) return _handoffTemplateCache;
+    try {
+      const r = await fetch('/api/settings/handoff-email-template');
+      const d = await r.json();
+      _handoffTemplateCache = d.template || '';
+    } catch (e) { _handoffTemplateCache = ''; }
+    return _handoffTemplateCache;
+  }
+
+  async function openSendHandoffModal(dealId) {
+    const deal = allDeals.find(d => d.id === dealId);
+    if (!deal) return;
+
+    const card = document.getElementById(`card-${dealId}`);
+    const selects = card.querySelectorAll('select.role-select');
+    const roles = {};
+    selects.forEach(s => { roles[s.dataset.role] = s.value; });
+
+    let customerEmail = '';
+    try {
+      const r = await fetch(`/api/deals/${dealId}/contact`);
+      const d = await r.json();
+      customerEmail = d.email || '';
+    } catch (e) { /* ignore */ }
+    if (!customerEmail) return showToast('No customer email found on this deal', true);
+
+    const amName  = allOwners.find(o => o.id === roles['am'])?.name || 'your Account Manager';
+    const seName  = allOwners.find(o => o.id === roles['se'])?.name || 'your Sales Executive';
+    const ccEmails = ['am', 'se']
+      .map(role => allOwners.find(o => o.id === roles[role])?.email)
+      .filter(Boolean);
+
+    const template = await getHandoffEmailTemplate();
+    const body = template
+      .replaceAll('[[account_manager]]', amName)
+      .replaceAll('[[sales_executive]]', seName);
+
+    const prospectCompany = (deal.name || '').split('|')[0].trim();
+
+    const toContainer = document.getElementById('handoffModalTo');
+    const ccContainer = document.getElementById('handoffModalCc');
+    toContainer.innerHTML = '';
+    addChip(toContainer, customerEmail);
+    ccContainer.innerHTML = '';
+    ccEmails.forEach(e => addChip(ccContainer, e));
+    document.getElementById('handoffExtraTo').value = '';
+    document.getElementById('handoffExtraCc').value = '';
+    document.getElementById('handoffModalSubject').value = `Runway Selling | Introducing Your Team | ${prospectCompany}`;
+    document.getElementById('handoffModalBody').value = body;
+
+    _pendingHandoff = { dealId, btn: document.getElementById(`handoff-${dealId}`) };
+    document.getElementById('handoffModal').style.display = 'flex';
+  }
+
+  function handoffModalAddExtra(target) {
+    const inputId     = target === 'to' ? 'handoffExtraTo' : 'handoffExtraCc';
+    const containerId = target === 'to' ? 'handoffModalTo' : 'handoffModalCc';
+    const input = document.getElementById(inputId);
+    const email = input.value.trim();
+    if (!email) return;
+    const container = document.getElementById(containerId);
+    const exists = Array.from(container.querySelectorAll('[data-email]')).some(c => c.dataset.email === email);
+    if (!exists) addChip(container, email);
+    input.value = '';
+  }
+
+  function closeHandoffModal() {
+    document.getElementById('handoffModal').style.display = 'none';
+    _pendingHandoff = null;
+  }
+
+  async function confirmSendHandoff() {
+    if (!_pendingHandoff) return;
+    const { dealId, btn } = _pendingHandoff;
+    const to = Array.from(document.getElementById('handoffModalTo').querySelectorAll('[data-email]')).map(c => c.dataset.email);
+    const cc = Array.from(document.getElementById('handoffModalCc').querySelectorAll('[data-email]')).map(c => c.dataset.email);
+    const subject = document.getElementById('handoffModalSubject').value.trim();
+    const body = document.getElementById('handoffModalBody').value;
+    if (!to.length) return showToast('At least one To recipient required', true);
+    if (!subject) return showToast('Subject required', true);
+
+    const sendBtn = document.getElementById('handoffModalSendBtn');
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending…';
+
+    try {
+      const resp = await fetch(`/api/deals/${dealId}/send-handoff-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, cc, subject, body }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Failed');
+
+      const deal = allDeals.find(d => d.id === dealId);
+      if (deal) deal.handoff_email_sent = true;
+
+      closeHandoffModal();
+      btn.textContent = '✓ Sent';
+      btn.classList.add('sent');
+      showToast('Handoff email sent to customer');
+    } catch (e) {
+      showToast('Failed to send — ' + e.message, true);
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send Email';
+    }
+  }
+
+  // Close modal on backdrop click
+  document.getElementById('handoffModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('handoffModal')) closeHandoffModal();
+  });
+
   function resetFilters() {
     const t = new Date(), w = new Date();
     w.setMonth(t.getMonth() - 2);
@@ -788,6 +947,7 @@
     const inviteStatusCls = d.meeting_id ? 'invited' : '';
     const notesStatusCls = d.client_facing_notes ? 'saved' : '';
     const sentCls = d.prep_email_sent ? 'sent' : '';
+    const handoffSentCls = d.handoff_email_sent ? 'sent' : '';
 
     const dropdowns = ROLE_KEYS.map(k => {
       const meta = ROLE_META[k];
@@ -899,6 +1059,15 @@
               <button class="btn-invite ${sentCls}" id="sendemail-${d.id}"
                       onclick="openSendEmailModal('${d.id}')">
                 ${d.prep_email_sent ? '✓ Sent' : 'Send Prep Email'}
+              </button>
+            </div>
+          </div>
+          <div class="step-box">
+            <span class="step-label">Step 6 (send handoff email to customer)</span>
+            <div class="notes-footer">
+              <button class="btn-invite ${handoffSentCls}" id="handoff-${d.id}"
+                      onclick="openSendHandoffModal('${d.id}')">
+                ${d.handoff_email_sent ? '✓ Sent' : 'Send Handoff Email'}
               </button>
             </div>
           </div>

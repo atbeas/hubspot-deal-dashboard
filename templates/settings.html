@@ -216,6 +216,17 @@
   <div class="template-footer">
     <button class="btn-save" id="templateSaveBtn" onclick="saveEmailTemplate()">Save</button>
   </div>
+
+  <div class="page-header section-gap">
+    <h2>Handoff Email Template</h2>
+    <p>Sent from scheduling@10talent.tech to the customer (from the original booking), CC'ing the Account Manager and Sales Executive, to introduce their team. Use <code>[[account_manager]]</code> and <code>[[sales_executive]]</code> as placeholders — they're replaced with the assigned names before sending. Editable per-email before sending.</p>
+  </div>
+
+  <textarea id="handoffTemplateInput" class="email-template-input"
+            oninput="markHandoffTemplateDirty()">{{ handoff_email_template }}</textarea>
+  <div class="template-footer">
+    <button class="btn-save" id="handoffTemplateSaveBtn" onclick="saveHandoffEmailTemplate()">Save</button>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -315,6 +326,38 @@
       btn.classList.add('saved');
       btn.disabled = false;
       showToast('Email template saved');
+    } catch (e) {
+      btn.textContent = 'Save';
+      btn.disabled = false;
+      showToast('Failed to save', true);
+    }
+  }
+
+  function markHandoffTemplateDirty() {
+    const input = document.getElementById('handoffTemplateInput');
+    input.classList.add('dirty');
+    const btn = document.getElementById('handoffTemplateSaveBtn');
+    btn.textContent = 'Save';
+    btn.classList.remove('saved');
+  }
+
+  async function saveHandoffEmailTemplate() {
+    const input = document.getElementById('handoffTemplateInput');
+    const btn = document.getElementById('handoffTemplateSaveBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const resp = await fetch('/api/settings/handoff-email-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template: input.value }),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      input.classList.remove('dirty');
+      btn.textContent = '✓ Saved';
+      btn.classList.add('saved');
+      btn.disabled = false;
+      showToast('Handoff email template saved');
     } catch (e) {
       btn.textContent = 'Save';
       btn.disabled = false;

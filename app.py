@@ -64,6 +64,12 @@ def init_db():
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS deal_handoff_email (
+                deal_id TEXT PRIMARY KEY,
+                sent_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -77,10 +83,20 @@ MS_CLIENT_ID     = os.environ.get("MS_CLIENT_ID", "")
 MS_CLIENT_SECRET = os.environ.get("MS_CLIENT_SECRET", "")
 SCHEDULING_EMAIL = "scheduling@10talent.tech"
 PREP_EMAIL_FROM  = "info@runwayselling.com"
+SEND_CONFIRM_BCC = "info@runwayselling.com"
 DEFAULT_EMAIL_TEMPLATE = (
     "Hi there,\n\n"
     "Thanks for taking the time to meet with us. Below are some notes to help "
     "you prepare for our upcoming conversation:\n"
+)
+DEFAULT_HANDOFF_EMAIL_TEMPLATE = (
+    "Hi there,\n\n"
+    "It was great learning more about your business. As we move forward, we wanted to "
+    "introduce you to your dedicated team:\n\n"
+    "[[account_manager]] — Account Manager\n"
+    "[[sales_executive]] — Sales Executive\n\n"
+    "They'll be your main points of contact moving forward and are happy to answer any "
+    "questions as we continue working together.\n"
 )
 
 def get_setting(key, default=""):
@@ -295,6 +311,12 @@ def get_deal_prep_emails():
     return {r["deal_id"] for r in rows}
 
 
+def get_deal_handoff_emails():
+    with get_db() as conn:
+        rows = conn.execute("SELECT deal_id FROM deal_handoff_email").fetchall()
+    return {r["deal_id"] for r in rows}
+
+
 @app.route("/api/owners")
 @login_required
 def get_owners():
@@ -371,6 +393,7 @@ def get_deals():
     owner_cache = {}
     deal_meetings = get_deal_meetings()
     prep_emails_sent = get_deal_prep_emails()
+    handoff_emails_sent = get_deal_handoff_emails()
 
     def resolve_owner(owner_id):
         if not owner_id:
@@ -420,6 +443,7 @@ def get_deals():
             "meeting_id":    meeting.get("id", ""),
             "meeting_label": meeting.get("label", ""),
             "prep_email_sent": result["id"] in prep_emails_sent,
+            "handoff_email_sent": result["id"] in handoff_emails_sent,
         })
 
     return jsonify({"deals": deals, "total": data.get("total", 0)})
@@ -743,7 +767,7 @@ def send_prep_email(deal_id):
         "subject": subject,
         "body": {"contentType": "Text", "content": content},
         "toRecipients": [{"emailAddress": {"address": e}} for e in to],
-        "bccRecipients": [{"emailAddress": {"address": PREP_EMAIL_FROM}}],
+        "bccRecipients": [{"emailAddress": {"address": SEND_CONFIRM_BCC}}],
     }
     if cc:
         message["ccRecipients"] = [{"emailAddress": {"address": e}} for e in cc]
@@ -759,6 +783,91 @@ def send_prep_email(deal_id):
     with get_db() as conn:
         conn.execute("""
             INSERT INTO deal_prep_email (deal_id, sent_at) VALUES (?, ?)
+            ON CONFLICT(deal_id) DO UPDATE SET sent_at = excluded.sent_at
+        """, [deal_id, datetime.now(timezone.utc).isoformat()])
+
+    return jsonify({"ok": True})
+
+
+@app.route("/api/deals/<deal_id>/contact")
+@login_required
+def get_deal_contact(deal_id):
+    resp = requests.get(
+        f"{BASE_URL}/crm/v4/objects/deals/{deal_id}/associations/contacts",
+        headers=HEADERS,
+    )
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    results = resp.json().get("results", [])
+    if not results:
+        return jsonify({"email": "", "name": ""})
+
+    contact_id = results[0]["toObjectId"]
+    contact_resp = requests.get(
+        f"{BASE_URL}/crm/v3/objects/contacts/{contact_id}",
+        headers=HEADERS,
+        params={"properties": "email,firstname,lastname"},
+    )
+    if not contact_resp.ok:
+        return jsonify({"error": contact_resp.text}), contact_resp.status_code
+
+    props = contact_resp.json().get("properties", {})
+    name = f"{props.get('firstname','')} {props.get('lastname','')}".strip()
+    return jsonify({"email": props.get("email", "") or "", "name": name})
+
+
+@app.route("/api/settings/handoff-email-template")
+@login_required
+def get_handoff_email_template():
+    return jsonify({"template": get_setting("handoff_email_template", DEFAULT_HANDOFF_EMAIL_TEMPLATE)})
+
+
+@app.route("/api/settings/handoff-email-template", methods=["POST"])
+@login_required
+def set_handoff_email_template():
+    body = request.get_json()
+    set_setting("handoff_email_template", body.get("template", ""))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/deals/<deal_id>/send-handoff-email", methods=["POST"])
+@login_required
+def send_handoff_email(deal_id):
+    body = request.get_json()
+    to      = [e for e in body.get("to", []) if e]
+    cc      = [e for e in body.get("cc", []) if e]
+    subject = body.get("subject", "").strip()
+    content = body.get("body", "")
+    if not to:
+        return jsonify({"error": "At least one recipient required"}), 400
+    if not subject:
+        return jsonify({"error": "Subject required"}), 400
+
+    token = get_ms_token()
+    if not token:
+        return jsonify({"error": "Could not get Microsoft token"}), 500
+
+    message = {
+        "subject": subject,
+        "body": {"contentType": "Text", "content": content},
+        "toRecipients": [{"emailAddress": {"address": e}} for e in to],
+        "bccRecipients": [{"emailAddress": {"address": SEND_CONFIRM_BCC}}],
+    }
+    if cc:
+        message["ccRecipients"] = [{"emailAddress": {"address": e}} for e in cc]
+
+    resp = requests.post(
+        f"https://graph.microsoft.com/v1.0/users/{SCHEDULING_EMAIL}/sendMail",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"message": message, "saveToSentItems": "true"},
+    )
+    if not resp.ok:
+        return jsonify({"error": resp.text}), resp.status_code
+
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO deal_handoff_email (deal_id, sent_at) VALUES (?, ?)
             ON CONFLICT(deal_id) DO UPDATE SET sent_at = excluded.sent_at
         """, [deal_id, datetime.now(timezone.utc).isoformat()])
 
@@ -798,9 +907,14 @@ def settings():
         o["eligible_sd"] = e["sd"]
 
     email_template = get_setting("email_intro_template", DEFAULT_EMAIL_TEMPLATE)
+    handoff_email_template = get_setting("handoff_email_template", DEFAULT_HANDOFF_EMAIL_TEMPLATE)
 
     return render_template(
-        "settings.html", client_options=client_options, owners=owners, email_template=email_template
+        "settings.html",
+        client_options=client_options,
+        owners=owners,
+        email_template=email_template,
+        handoff_email_template=handoff_email_template,
     )
 
 
