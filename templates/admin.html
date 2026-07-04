@@ -42,6 +42,20 @@
     }
     .status-badge.custom { background: #dcfce7; color: #15803d; }
     .status-badge.default { background: #fef3c7; color: #92400e; }
+    .status-badge.connected { background: #dcfce7; color: #15803d; }
+    .status-badge.error { background: #fee2e2; color: #b91c1c; }
+
+    .calendar-card {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 12px;
+      padding: 16px 22px; margin-bottom: 12px;
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    }
+    .calendar-info { display: flex; flex-direction: column; gap: 2px; }
+    .calendar-label { font-size: .95rem; font-weight: 700; color: #1a1a2e; }
+    .calendar-email { font-size: .82rem; color: #6b7280; }
+    .calendar-detail { font-size: .78rem; color: #9ca3af; }
+
+    .section-divider { margin: 36px 0 24px; border: none; border-top: 1px solid #e2e4e9; }
 
     .pw-row { display: flex; gap: 10px; }
     input.pw-input {
@@ -90,6 +104,28 @@
 </header>
 
 <div class="page-wrap">
+  <div class="page-header">
+    <h2>Connected Calendars</h2>
+    <p>Calendars this app pulls meetings from and books invites on. More will be added here over time.</p>
+  </div>
+
+  {% for cal in calendars %}
+  <div class="calendar-card">
+    <div class="calendar-info">
+      <div class="calendar-label">{{ cal.label }}</div>
+      <div class="calendar-email">{{ cal.email }}</div>
+      {% if cal.detail %}<div class="calendar-detail">{{ cal.detail }}</div>{% endif %}
+    </div>
+    {% if cal.connected %}
+    <div class="status-badge connected">Connected</div>
+    {% else %}
+    <div class="status-badge error">Connection Error</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <hr class="section-divider" />
+
   <div class="page-header">
     <h2>Quick Notes Company Passwords</h2>
     <p>Each company gets its own password to sign into its quick-notes page. Setting a password here replaces the shared dashboard password for that company only — it does not grant access to this admin page or the main dashboard.</p>

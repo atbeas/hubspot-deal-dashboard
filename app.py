@@ -91,6 +91,11 @@ MS_TENANT_ID     = os.environ.get("MS_TENANT_ID", "")
 MS_CLIENT_ID     = os.environ.get("MS_CLIENT_ID", "")
 MS_CLIENT_SECRET = os.environ.get("MS_CLIENT_SECRET", "")
 SCHEDULING_EMAIL = "scheduling@10talent.tech"
+# Every calendar mailbox the app pulls meetings from / books invites on.
+# Add an entry here when a new calendar is wired up.
+CONNECTED_CALENDARS = [
+    {"email": SCHEDULING_EMAIL, "label": "10talent Tech Scheduling"},
+]
 PREP_EMAIL_FROM  = "info@runwayselling.com"
 SEND_CONFIRM_BCC = "info@runwayselling.com"
 DEFAULT_EMAIL_TEMPLATE = (
@@ -131,6 +136,25 @@ def get_ms_token():
         },
     )
     return resp.json().get("access_token", "")
+
+def get_calendar_status(email):
+    # Hits the /calendar endpoint (not /users/{email}) because the app's
+    # Graph permissions are scoped to Calendars.* only, not User.Read.All —
+    # a directory lookup would 403 even when the calendar itself is fine.
+    try:
+        token = get_ms_token()
+        if not token:
+            return {"connected": False, "detail": "Could not authenticate with Microsoft Graph"}
+        resp = requests.get(
+            f"https://graph.microsoft.com/v1.0/users/{email}/calendar?$select=name,owner",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if resp.ok:
+            owner_name = resp.json().get("owner", {}).get("name", "")
+            return {"connected": True, "detail": f"Owner: {owner_name}" if owner_name else ""}
+        return {"connected": False, "detail": f"Graph API error ({resp.status_code})"}
+    except Exception as e:
+        return {"connected": False, "detail": str(e)}
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
@@ -762,7 +786,13 @@ def admin():
             "label": cfg["label"],
             "has_custom_password": get_company_password_hash(key) is not None,
         })
-    return render_template("admin.html", companies=companies)
+
+    calendars = []
+    for cfg in CONNECTED_CALENDARS:
+        status = get_calendar_status(cfg["email"])
+        calendars.append({**cfg, **status})
+
+    return render_template("admin.html", companies=companies, calendars=calendars)
 
 
 @app.route("/api/admin/companies/<company>/password", methods=["POST"])
