@@ -382,6 +382,9 @@ def get_initial_meeting_times(deal_ids):
             result[deal_id] = {
                 "label": dt_utc.astimezone(PACIFIC_TZ).strftime("%b %d, %Y %-I:%M %p PT"),
                 "start_utc": dt_utc.isoformat(),
+                # Only one calendar is wired up today; once more are added, this
+                # should reflect whichever calendar the meeting was actually found on.
+                "calendar": SCHEDULING_EMAIL,
             }
         except Exception:
             continue
@@ -548,6 +551,7 @@ def get_deals():
             "meeting_label": meeting.get("label", ""),
             "initial_meeting": initial_meeting_times.get(result["id"], {}).get("label", ""),
             "initial_meeting_start": initial_meeting_times.get(result["id"], {}).get("start_utc", ""),
+            "initial_meeting_calendar": initial_meeting_times.get(result["id"], {}).get("calendar", ""),
             "prep_email_sent": result["id"] in prep_emails_sent,
             "handoff_email_sent": result["id"] in handoff_emails_sent,
             "archived":    is_archived,

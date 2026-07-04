@@ -99,6 +99,7 @@
     .deal-name { font-weight: 700; font-size: .95rem; color: #e8e9f0; text-decoration: none; }
     .deal-name:hover { color: #ff5c35; text-decoration: underline; }
     .initial-meeting { font-size: .76rem; color: #8b8fa8; }
+    .initial-meeting-calendar { font-size: .72rem; color: #5c607a; }
     .meta { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
     .meta-item { font-size: .8rem; color: #8b8fa8; display: flex; flex-direction: column; gap: 1px; }
     .meta-item strong { color: #c9cad8; font-weight: 600; }
@@ -1056,6 +1057,7 @@
         <div class="deal-name-wrap">
           <a class="deal-name" href="https://app.hubspot.com/contacts/23416553/deal/${d.id}" target="_blank" rel="noopener">${esc(d.name)}</a>
           ${d.initial_meeting ? `<span class="initial-meeting">📅 ${esc(d.initial_meeting)}</span>` : ''}
+          ${d.initial_meeting_calendar ? `<span class="initial-meeting-calendar">Calendar: ${esc(d.initial_meeting_calendar)}</span>` : ''}
         </div>
         <div class="meta">
           <div class="meta-item"><span>Created</span><strong>${esc(d.created)}</strong></div>
