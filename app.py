@@ -75,6 +75,12 @@ def init_db():
                 value TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS deal_archive (
+                deal_id TEXT PRIMARY KEY,
+                archived_at TEXT NOT NULL
+            )
+        """)
 
 init_db()
 
@@ -317,6 +323,12 @@ def get_deal_handoff_emails():
     return {r["deal_id"] for r in rows}
 
 
+def get_deal_archive():
+    with get_db() as conn:
+        rows = conn.execute("SELECT deal_id, archived_at FROM deal_archive").fetchall()
+    return {r["deal_id"]: r["archived_at"] for r in rows}
+
+
 @app.route("/api/owners")
 @login_required
 def get_owners():
@@ -357,6 +369,7 @@ def set_owner_eligibility(owner_id):
 def get_deals():
     start = request.args.get("start")
     end   = request.args.get("end")
+    show_archived = request.args.get("archived", "false").lower() == "true"
     if not start or not end:
         return jsonify({"error": "start and end required"}), 400
 
@@ -394,6 +407,7 @@ def get_deals():
     deal_meetings = get_deal_meetings()
     prep_emails_sent = get_deal_prep_emails()
     handoff_emails_sent = get_deal_handoff_emails()
+    deal_archive = get_deal_archive()
 
     def resolve_owner(owner_id):
         if not owner_id:
@@ -426,6 +440,17 @@ def get_deals():
 
         meeting = deal_meetings.get(result["id"], {})
 
+        archived_at_raw = deal_archive.get(result["id"])
+        is_archived = archived_at_raw is not None
+        if is_archived != show_archived:
+            continue
+        archived_at = ""
+        if archived_at_raw:
+            try:
+                archived_at = datetime.fromisoformat(archived_at_raw).strftime("%b %d, %Y")
+            except Exception:
+                archived_at = archived_at_raw
+
         deals.append({
             "id":      result["id"],
             "name":    props.get("dealname") or "(No name)",
@@ -444,9 +469,11 @@ def get_deals():
             "meeting_label": meeting.get("label", ""),
             "prep_email_sent": result["id"] in prep_emails_sent,
             "handoff_email_sent": result["id"] in handoff_emails_sent,
+            "archived":    is_archived,
+            "archived_at": archived_at,
         })
 
-    return jsonify({"deals": deals, "total": data.get("total", 0)})
+    return jsonify({"deals": deals, "total": len(deals)})
 
 
 @app.route("/api/deals/<deal_id>", methods=["PATCH"])
@@ -729,6 +756,25 @@ def set_deal_meeting(deal_id):
             ON CONFLICT(deal_id) DO UPDATE SET meeting_id = excluded.meeting_id,
                                                 meeting_label = excluded.meeting_label
         """, [deal_id, meeting_id, meeting_label])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/deals/<deal_id>/archive", methods=["POST"])
+@login_required
+def archive_deal(deal_id):
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO deal_archive (deal_id, archived_at) VALUES (?, ?)
+            ON CONFLICT(deal_id) DO UPDATE SET archived_at = excluded.archived_at
+        """, [deal_id, datetime.now(timezone.utc).isoformat()])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/deals/<deal_id>/unarchive", methods=["POST"])
+@login_required
+def unarchive_deal(deal_id):
+    with get_db() as conn:
+        conn.execute("DELETE FROM deal_archive WHERE deal_id = ?", [deal_id])
     return jsonify({"ok": True})
 
 

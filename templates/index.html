@@ -25,6 +25,7 @@
       border: 1px solid rgba(255,255,255,.1); transition: background .15s;
     }
     .nav-link:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
+    .nav-link.active { background: #ff5c35; color: #fff; border-color: #ff5c35; }
 
     /* ── SD dropdown ── */
     .nav-dropdown { position: relative; }
@@ -196,6 +197,25 @@
     .btn-invite.invited { background: #22c55e; }
     .btn-invite.sent { background: #22c55e; }
 
+    /* ── Step 7: archive ── */
+    .archive-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; padding: 14px 20px; border-top: 1px solid #252839;
+    }
+    .btn-archive {
+      padding: 9px 20px; border-radius: 7px; font-size: .88rem; font-weight: 600;
+      cursor: pointer; border: 1px solid #2a2d3e; background: rgba(255,255,255,.06);
+      color: #c9cad8; white-space: nowrap; transition: background .15s, color .15s;
+    }
+    .btn-archive:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
+    .btn-unarchive {
+      padding: 9px 20px; border-radius: 7px; font-size: .88rem; font-weight: 600;
+      cursor: pointer; border: none; background: #2563eb; color: #fff;
+      white-space: nowrap; transition: background .15s;
+    }
+    .btn-unarchive:hover { background: #1d4ed8; }
+    .archived-badge { font-size: .78rem; color: #8b8fa8; }
+
     /* ── Notes (right column) ── */
     .card-right {
       display: flex; flex-direction: column; gap: 14px;
@@ -281,6 +301,7 @@
         <a href="/roslyn">Roslyn Yee</a>
       </div>
     </div>
+    <a href="#" class="nav-link" id="archiveTabLink" onclick="toggleArchiveView(event)">🗄 Archived Meetings</a>
     <a href="/admin" class="nav-link">🔐 Admin</a>
     <a href="/settings" class="nav-link">⚙ Settings</a>
     <a href="/logout" class="nav-link">Log Out</a>
@@ -424,6 +445,7 @@
   });
   let allOwners   = [];
   let allDeals    = [];
+  let showArchived = false;
   let allMeetings = [];
 
   // Client options come from the server (rs_partner enum)
@@ -896,10 +918,10 @@
     if (!start || !end) return showToast('Pick a date range first', true);
 
     document.getElementById('cardsWrap').innerHTML =
-      '<div class="state-box"><span class="spinner"></span>Loading deals from HubSpot…</div>';
+      `<div class="state-box"><span class="spinner"></span>Loading ${showArchived ? 'archived meetings' : 'deals'} from HubSpot…</div>`;
     document.getElementById('statsBar').style.display = 'none';
 
-    const params = new URLSearchParams({ start, end });
+    const params = new URLSearchParams({ start, end, archived: showArchived });
 
     try {
       const [dealsResp] = await Promise.all([
@@ -911,7 +933,7 @@
       if (!dealsResp.ok) throw new Error(data.error || 'Failed to load deals');
       allDeals = data.deals;
       document.getElementById('totalLabel').textContent =
-        `${data.total} deal${data.total !== 1 ? 's' : ''} in range`;
+        `${data.total} ${showArchived ? 'archived meeting' : 'deal'}${data.total !== 1 ? 's' : ''} in range`;
       render();
     } catch(e) {
       document.getElementById('cardsWrap').innerHTML = `<div class="state-box">⚠ ${esc(e.message)}</div>`;
@@ -919,12 +941,45 @@
     }
   }
 
+  function toggleArchiveView(e) {
+    e.preventDefault();
+    showArchived = !showArchived;
+    document.getElementById('archiveTabLink').classList.toggle('active', showArchived);
+    document.getElementById('archiveTabLink').textContent = showArchived ? '🗄 Back to Active Deals' : '🗄 Archived Meetings';
+    if (document.getElementById('startDate').value && document.getElementById('endDate').value) {
+      loadDeals();
+    } else {
+      resetFilters();
+    }
+  }
+
+  async function archiveDeal(dealId) {
+    try {
+      const resp = await fetch(`/api/deals/${dealId}/archive`, { method: 'POST' });
+      if (!resp.ok) throw new Error('Failed to archive');
+      allDeals = allDeals.filter(d => d.id !== dealId);
+      render();
+      showToast('Meeting archived');
+    } catch (e) { showToast(e.message, true); }
+  }
+
+  async function unarchiveDeal(dealId) {
+    try {
+      const resp = await fetch(`/api/deals/${dealId}/unarchive`, { method: 'POST' });
+      if (!resp.ok) throw new Error('Failed to unarchive');
+      allDeals = allDeals.filter(d => d.id !== dealId);
+      render();
+      showToast('Meeting restored to active deals');
+    } catch (e) { showToast(e.message, true); }
+  }
+
   function render() {
     updateStats();
     document.getElementById('statsBar').style.display = 'flex';
 
     if (!allDeals.length) {
-      document.getElementById('cardsWrap').innerHTML = '<div class="state-box">No deals found in this date range</div>';
+      document.getElementById('cardsWrap').innerHTML =
+        `<div class="state-box">No ${showArchived ? 'archived meetings' : 'deals'} found in this date range</div>`;
       return;
     }
 
@@ -1089,6 +1144,16 @@
             </div>
           </div>
         </div>
+      </div>
+      <div class="archive-footer">
+        <span class="step-label">Step 7 (archive the meeting)</span>
+        ${d.archived
+          ? `<div style="display:flex; align-items:center; gap:12px;">
+               <span class="archived-badge">Archived ${esc(d.archived_at)}</span>
+               <button class="btn-unarchive" id="archive-${d.id}" onclick="unarchiveDeal('${d.id}')">↩ Unarchive</button>
+             </div>`
+          : `<button class="btn-archive" id="archive-${d.id}" onclick="archiveDeal('${d.id}')">🗄 Archive Meeting</button>`
+        }
       </div>
     </div>`;
   }
