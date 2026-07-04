@@ -60,6 +60,10 @@ def init_db():
                 meeting_label TEXT NOT NULL
             )
         """)
+        try:
+            conn.execute("ALTER TABLE deal_meeting ADD COLUMN meeting_calendar TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS deal_prep_email (
                 deal_id TEXT PRIMARY KEY,
@@ -95,6 +99,7 @@ SCHEDULING_EMAIL = "scheduling@10talent.tech"
 # Add an entry here when a new calendar is wired up.
 CONNECTED_CALENDARS = [
     {"email": SCHEDULING_EMAIL, "label": "10talent Tech Scheduling"},
+    {"email": "info@runwayselling.com", "label": "Runway Selling Scheduling"},
 ]
 PREP_EMAIL_FROM  = "info@runwayselling.com"
 SEND_CONFIRM_BCC = "info@runwayselling.com"
@@ -293,7 +298,7 @@ def index():
             if not o.get("hidden")
         ]
 
-    return render_template("index.html", client_options=client_options)
+    return render_template("index.html", client_options=client_options, connected_calendars=CONNECTED_CALENDARS)
 
 
 def fetch_hubspot_owners():
@@ -335,7 +340,10 @@ def get_owner_eligibility():
 def get_deal_meetings():
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM deal_meeting").fetchall()
-    return {r["deal_id"]: {"id": r["meeting_id"], "label": r["meeting_label"]} for r in rows}
+    return {
+        r["deal_id"]: {"id": r["meeting_id"], "label": r["meeting_label"], "calendar": r["meeting_calendar"] or ""}
+        for r in rows
+    }
 
 
 def _chunks(lst, n):
@@ -427,9 +435,9 @@ def get_initial_meeting_times(deal_ids):
             result[deal_id] = {
                 "label": dt_utc.astimezone(PACIFIC_TZ).strftime("%b %d, %Y %-I:%M %p PT"),
                 "start_utc": dt_utc.isoformat(),
-                # Only one calendar is wired up today; once more are added, this
-                # should reflect whichever calendar the meeting was actually found on.
-                "calendar": SCHEDULING_EMAIL,
+                # Which live calendar mailbox actually hosts this meeting isn't
+                # recorded in HubSpot — the frontend resolves that by matching
+                # this start_utc against the merged /api/meetings result.
                 "booking_link": contact_booking_links.get(contact_id, ""),
             }
         except Exception:
@@ -593,11 +601,11 @@ def get_deals():
             "se":            props.get(ROLE_PROPS["se"])     or "",
             "business_needs": props.get("business_needs")   or "",
             "client_facing_notes": props.get("client_facing_notes") or "",
-            "meeting_id":    meeting.get("id", ""),
-            "meeting_label": meeting.get("label", ""),
+            "meeting_id":       meeting.get("id", ""),
+            "meeting_label":    meeting.get("label", ""),
+            "meeting_calendar": meeting.get("calendar", ""),
             "initial_meeting": initial_meeting_times.get(result["id"], {}).get("label", ""),
             "initial_meeting_start": initial_meeting_times.get(result["id"], {}).get("start_utc", ""),
-            "initial_meeting_calendar": initial_meeting_times.get(result["id"], {}).get("calendar", ""),
             "initial_meeting_booking_link": initial_meeting_times.get(result["id"], {}).get("booking_link", ""),
             "prep_email_sent": result["id"] in prep_emails_sent,
             "handoff_email_sent": result["id"] in handoff_emails_sent,
@@ -820,51 +828,66 @@ def get_meetings():
     start = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
     end   = (now + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    resp = requests.get(
-        f"https://graph.microsoft.com/v1.0/users/{SCHEDULING_EMAIL}/calendarView",
-        headers=ms_headers,
-        params={
-            "startDateTime": start,
-            "endDateTime":   end,
-            "$select":       "id,subject,start,end,attendees",
-            "$orderby":      "start/dateTime",
-            "$top":          100,
-        },
-    )
-    if not resp.ok:
-        return jsonify({"error": resp.text}), resp.status_code
-
+    # Pull from every connected calendar so Step 3 and the conflict check can
+    # see meetings regardless of which mailbox they're actually booked on.
     meetings = []
-    for e in resp.json().get("value", []):
-        start_utc = ""
-        try:
-            # Graph calendarView returns UTC dateTimes without a "Z" suffix
-            # (confirmed via start.timeZone == "UTC") unless a Prefer header
-            # requests otherwise, so treat the raw value as UTC.
-            dt_utc = datetime.fromisoformat(e["start"]["dateTime"].rstrip("Z")).replace(tzinfo=timezone.utc)
-            start_utc = dt_utc.isoformat()
-            label = f"{e['subject']} — {dt_utc.astimezone(PACIFIC_TZ).strftime('%b %d, %Y %-I:%M %p')} PT"
-        except Exception:
-            label = e.get("subject", "(No subject)")
-        meetings.append({"id": e["id"], "label": label, "start_utc": start_utc})
+    for cal in CONNECTED_CALENDARS:
+        resp = requests.get(
+            f"https://graph.microsoft.com/v1.0/users/{cal['email']}/calendarView",
+            headers=ms_headers,
+            params={
+                "startDateTime": start,
+                "endDateTime":   end,
+                "$select":       "id,subject,start,end,attendees",
+                "$orderby":      "start/dateTime",
+                "$top":          100,
+            },
+        )
+        if not resp.ok:
+            continue
 
+        for e in resp.json().get("value", []):
+            start_utc = ""
+            try:
+                # Graph calendarView returns UTC dateTimes without a "Z" suffix
+                # (confirmed via start.timeZone == "UTC") unless a Prefer header
+                # requests otherwise, so treat the raw value as UTC.
+                dt_utc = datetime.fromisoformat(e["start"]["dateTime"].rstrip("Z")).replace(tzinfo=timezone.utc)
+                start_utc = dt_utc.isoformat()
+                label = f"{e['subject']} — {dt_utc.astimezone(PACIFIC_TZ).strftime('%b %d, %Y %-I:%M %p')} PT"
+            except Exception:
+                label = e.get("subject", "(No subject)")
+            meetings.append({
+                "id": e["id"],
+                "label": label,
+                "start_utc": start_utc,
+                "calendar": cal["email"],
+                "calendar_label": cal["label"],
+            })
+
+    meetings.sort(key=lambda m: m["start_utc"])
     return jsonify({"meetings": meetings})
 
 
 @app.route("/api/meetings/<path:event_id>/add-attendees", methods=["POST"])
 @login_required
 def add_meeting_attendees(event_id):
-    body   = request.get_json()
-    emails = [e for e in body.get("emails", []) if e]
+    body     = request.get_json()
+    emails   = [e for e in body.get("emails", []) if e]
+    calendar = body.get("calendar", "")
     if not emails:
         return jsonify({"error": "No emails provided"}), 400
+    # Event IDs are scoped to a single mailbox, so we need to know which
+    # connected calendar this event lives on before we can look it up.
+    if calendar not in {c["email"] for c in CONNECTED_CALENDARS}:
+        return jsonify({"error": "Unknown or missing calendar"}), 400
 
     token = get_ms_token()
     ms_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     # Fetch current attendees so we don't wipe them
     resp = requests.get(
-        f"https://graph.microsoft.com/v1.0/users/{SCHEDULING_EMAIL}/events/{event_id}",
+        f"https://graph.microsoft.com/v1.0/users/{calendar}/events/{event_id}",
         headers=ms_headers,
         params={"$select": "attendees"},
     )
@@ -880,7 +903,7 @@ def add_meeting_attendees(event_id):
             existing.add(email.lower())
 
     patch = requests.patch(
-        f"https://graph.microsoft.com/v1.0/users/{SCHEDULING_EMAIL}/events/{event_id}",
+        f"https://graph.microsoft.com/v1.0/users/{calendar}/events/{event_id}",
         headers=ms_headers,
         json={"attendees": current},
     )
@@ -894,18 +917,20 @@ def add_meeting_attendees(event_id):
 @login_required
 def set_deal_meeting(deal_id):
     body = request.get_json()
-    meeting_id    = body.get("meeting_id", "")
-    meeting_label = body.get("meeting_label", "")
+    meeting_id       = body.get("meeting_id", "")
+    meeting_label    = body.get("meeting_label", "")
+    meeting_calendar = body.get("meeting_calendar", "")
     if not meeting_id:
         return jsonify({"error": "meeting_id required"}), 400
 
     with get_db() as conn:
         conn.execute("""
-            INSERT INTO deal_meeting (deal_id, meeting_id, meeting_label)
-            VALUES (?, ?, ?)
+            INSERT INTO deal_meeting (deal_id, meeting_id, meeting_label, meeting_calendar)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(deal_id) DO UPDATE SET meeting_id = excluded.meeting_id,
-                                                meeting_label = excluded.meeting_label
-        """, [deal_id, meeting_id, meeting_label])
+                                                meeting_label = excluded.meeting_label,
+                                                meeting_calendar = excluded.meeting_calendar
+        """, [deal_id, meeting_id, meeting_label, meeting_calendar])
     return jsonify({"ok": True})
 
 

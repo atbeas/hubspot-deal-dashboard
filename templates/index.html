@@ -242,6 +242,13 @@
       font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
       color: #8b8fa8; background: rgba(139,143,168,.15); border-radius: 4px; padding: 1px 5px;
     }
+    .conflict-calendar-tag {
+      font-size: .66rem; font-weight: 700; letter-spacing: .2px;
+      color: #a5b4fc; background: rgba(124,143,214,.15); border-radius: 4px; padding: 1px 5px;
+    }
+    .meeting-option-cal {
+      font-size: .68rem; color: #8b8fa8; margin-left: 6px;
+    }
     .conflict-role-line { color: #c9cad8; }
     .conflict-role-line .role-empty { color: #5c607a; }
     .conflict-role-warning { color: #f87171; font-weight: 700; }
@@ -501,6 +508,13 @@
   // Client options come from the server (rs_partner enum)
   const CLIENT_OPTIONS = {{ client_options | tojson }};
 
+  // Every calendar mailbox the app is wired to — used to show a friendly
+  // label next to meetings instead of a raw mailbox address.
+  const CONNECTED_CALENDARS = {{ connected_calendars | tojson }};
+  function calendarLabel(email) {
+    return CONNECTED_CALENDARS.find(c => c.email === email)?.label || email;
+  }
+
   // Default: last 7 days
   const today = new Date(), sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(today.getDate() - 7);
@@ -611,6 +625,17 @@
     return d.initial_meeting_start || '';
   }
 
+  // Which calendar mailbox the deal's meeting actually lives on: the saved
+  // pick's calendar if confirmed, otherwise whatever calendar the resolved
+  // (saved or suggested) meeting was found on. Falls back to '' — unknown —
+  // rather than guessing, since HubSpot itself doesn't record this.
+  function resolvedCalendarEmail(d) {
+    if (d.meeting_calendar) return d.meeting_calendar;
+    const mid = getDealMeetingId(d);
+    const m = allMeetings.find(x => x.id === mid);
+    return m ? m.calendar : '';
+  }
+
   const CONFLICT_ROLE_LABELS = { client: 'Client', am: 'Account Manager', se: 'Sales Executive' };
 
   // Other calendar meetings at the exact same start time as this deal's
@@ -654,9 +679,12 @@
       const dealLine = c.otherDeal
         ? `<div class="conflict-deal">${esc(c.otherDeal.name)}${c.otherDeal.archived ? ' <span class="conflict-archived-tag">Archived</span>' : ''}</div>`
         : '<div class="conflict-deal">(not linked to a loaded deal)</div>';
+      const calTag = c.meeting.calendar
+        ? ` <span class="conflict-calendar-tag">${esc(calendarLabel(c.meeting.calendar))}</span>`
+        : '';
       return `
         <div class="conflict-item">
-          <div class="conflict-meeting">${esc(c.meeting.label)}</div>
+          <div class="conflict-meeting">${esc(c.meeting.label)}${calTag}</div>
           ${dealLine}
           ${c.otherDeal ? roleLines : ''}
         </div>`;
@@ -666,6 +694,7 @@
   function selectMeeting(dealId, el) {
     const changed = document.getElementById(`meeting-${dealId}`).value !== el.dataset.id;
     document.getElementById(`meeting-${dealId}`).value        = el.dataset.id;
+    document.getElementById(`meetingcal-${dealId}`).value     = el.dataset.calendar || '';
     document.getElementById(`meetingtext-${dealId}`).textContent = el.dataset.label;
     document.getElementById(`meetingtrigger-${dealId}`).classList.add('has-value');
     document.getElementById(`meetingtrigger-${dealId}`).classList.remove('suggested');
@@ -696,7 +725,9 @@
 
   async function addToInvite(dealId) {
     const eventId = document.getElementById(`meeting-${dealId}`).value;
+    const eventCalendar = document.getElementById(`meetingcal-${dealId}`).value;
     if (!eventId) return showToast('Select a meeting first', true);
+    if (!eventCalendar) return showToast('Could not determine which calendar this meeting is on — reselect it from the dropdown', true);
     document.getElementById(`meetingtrigger-${dealId}`).classList.remove('suggested');
 
     const card   = document.getElementById(`card-${dealId}`);
@@ -724,7 +755,7 @@
     if (!allEmails.length) return showToast('Assign at least SD, AM, or SE first', true);
 
     const meetingLabel = document.getElementById(`meetingtext-${dealId}`).textContent;
-    _pendingInvite = { dealId, eventId, meetingLabel, btn: document.getElementById(`invite-${dealId}`) };
+    _pendingInvite = { dealId, eventId, eventCalendar, meetingLabel, btn: document.getElementById(`invite-${dealId}`) };
     openModal(allEmails);
   }
 
@@ -761,7 +792,7 @@
 
   async function confirmInvite() {
     if (!_pendingInvite) return;
-    const { dealId, eventId, meetingLabel, btn } = _pendingInvite;
+    const { dealId, eventId, eventCalendar, meetingLabel, btn } = _pendingInvite;
     const emails = Array.from(document.getElementById('modalAttendees').querySelectorAll('[data-email]'))
       .map(c => c.dataset.email);
     if (!emails.length) return showToast('No attendees selected', true);
@@ -773,7 +804,7 @@
       const resp = await fetch(`/api/meetings/${encodeURIComponent(eventId)}/add-attendees`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ emails }),
+        body: JSON.stringify({ emails, calendar: eventCalendar }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Failed');
@@ -781,11 +812,11 @@
       fetch(`/api/deals/${dealId}/meeting`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ meeting_id: eventId, meeting_label: meetingLabel }),
+        body: JSON.stringify({ meeting_id: eventId, meeting_label: meetingLabel, meeting_calendar: eventCalendar }),
       }).catch(() => {});
 
       const deal = allDeals.find(d => d.id === dealId);
-      if (deal) { deal.meeting_id = eventId; deal.meeting_label = meetingLabel; }
+      if (deal) { deal.meeting_id = eventId; deal.meeting_label = meetingLabel; deal.meeting_calendar = eventCalendar; }
 
       closeModal();
       btn.textContent = '✓ Added';
@@ -1196,6 +1227,7 @@
     const suggestedMeeting = !d.meeting_id ? findSuggestedMeeting(d) : null;
     const ambiguousTie = !d.meeting_id && !suggestedMeeting && hasUnresolvedMeetingTie(d);
     const meetingValue = d.meeting_id || (suggestedMeeting ? suggestedMeeting.id : '');
+    const meetingCalendarValue = d.meeting_calendar || (suggestedMeeting ? suggestedMeeting.calendar : '');
     const meetingText  = d.meeting_label
       || (suggestedMeeting ? suggestedMeeting.label : '')
       || (ambiguousTie ? '⚠ Multiple meetings at this time — select manually' : '— Select meeting —');
@@ -1204,6 +1236,7 @@
       : ambiguousTie ? 'ambiguous'
       : '';
     const conflictsHtml = conflictPanelHtml(d);
+    const dealCalendarEmail = resolvedCalendarEmail(d);
 
     return `
     <div class="card" id="card-${d.id}">
@@ -1211,7 +1244,7 @@
         <div class="deal-name-wrap">
           <a class="deal-name" href="https://app.hubspot.com/contacts/23416553/deal/${d.id}" target="_blank" rel="noopener">${esc(d.name)}</a>
           ${d.initial_meeting ? `<span class="initial-meeting">📅 ${esc(d.initial_meeting)}</span>` : ''}
-          ${d.initial_meeting_calendar ? `<span class="initial-meeting-calendar">Calendar: ${esc(d.initial_meeting_calendar)}</span>` : ''}
+          ${dealCalendarEmail ? `<span class="initial-meeting-calendar">Calendar: ${esc(calendarLabel(dealCalendarEmail))}</span>` : ''}
           ${d.initial_meeting_booking_link ? `<span class="initial-meeting-booking-link">Booking Link: <a href="${esc(d.initial_meeting_booking_link)}" target="_blank" rel="noopener">${esc(d.initial_meeting_booking_link)}</a></span>` : ''}
         </div>
         <div class="meta">
@@ -1324,15 +1357,16 @@
                     <div class="meeting-list" id="meetinglist-${d.id}">
                       ${allMeetings.length
                         ? allMeetings.map(m => `
-                          <div class="meeting-option" data-id="${esc(m.id)}" data-label="${esc(m.label)}"
+                          <div class="meeting-option" data-id="${esc(m.id)}" data-label="${esc(m.label)}" data-calendar="${esc(m.calendar || '')}"
                                onclick="selectMeeting('${d.id}', this)">
-                            ${esc(m.label)}
+                            ${esc(m.label)}${CONNECTED_CALENDARS.length > 1 ? ` <span class="meeting-option-cal">${esc(calendarLabel(m.calendar))}</span>` : ''}
                           </div>`).join('')
                         : '<div class="meeting-empty">No meetings found</div>'
                       }
                     </div>
                   </div>
                   <input type="hidden" id="meeting-${d.id}" value="${esc(meetingValue)}" />
+                  <input type="hidden" id="meetingcal-${d.id}" value="${esc(meetingCalendarValue)}" />
                 </div>
                 <button class="btn-invite ${inviteStatusCls}" id="invite-${d.id}" onclick="addToInvite('${d.id}')">
                   ${d.meeting_id ? '✓ Added' : 'Add to Invite'}
