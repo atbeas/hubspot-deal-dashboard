@@ -208,14 +208,22 @@
       letter-spacing: .5px; color: #8b8fa8;
     }
     .notes-label span { font-weight: 400; text-transform: none; letter-spacing: 0; color: #5c607a; font-size: .72rem; margin-left: 6px; }
+    .notes-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .btn-expand {
+      background: rgba(255,255,255,.06); color: #8b8fa8; border: 1px solid #2a2d3e;
+      border-radius: 5px; font-size: .7rem; font-weight: 600; padding: 3px 8px;
+      cursor: pointer; white-space: nowrap;
+    }
+    .btn-expand:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
     .notes-footer { display: flex; justify-content: flex-end; }
     textarea.needs-input {
       width: 100%; flex: 1; border: 1px solid #2a2d3e; border-radius: 7px;
       padding: 9px 12px; font-size: .88rem; font-family: inherit;
       color: #e8e9f0; resize: vertical; background: #252839;
-      outline: none; transition: border-color .2s, box-shadow .2s;
+      outline: none; transition: border-color .2s, box-shadow .2s, min-height .2s;
       line-height: 1.5; min-height: 80px;
     }
+    textarea.needs-input.expanded { min-height: 340px; }
     textarea.needs-input:focus { border-color: #ff5c35; box-shadow: 0 0 0 3px rgba(255,92,53,.15); }
     textarea.needs-input.dirty     { background: rgba(251,191,36,.06); border-color: #fbbf24; }
     textarea.needs-input.has-value { background: rgba(37,99,235,.1);   border-color: #3b82f6; }
@@ -1028,7 +1036,10 @@
           <div class="step-box">
             <span class="step-label">Step 3 (review SD Notes)</span>
             <div class="note-block">
-              <span class="notes-label">Deal Notes <span>· business_needs</span></span>
+              <div class="notes-label-row">
+                <span class="notes-label">Deal Notes <span>· business_needs</span></span>
+                <button type="button" class="btn-expand" onclick="toggleNotesExpand(this)">⤢ Expand</button>
+              </div>
               <textarea class="needs-input ${needsHasValue ? 'has-value' : ''}"
                         id="needs-${d.id}"
                         data-deal="${d.id}"
@@ -1039,7 +1050,10 @@
           <div class="step-box">
             <span class="step-label">Step 4 (edit the meeting notes for the client)</span>
             <div class="note-block">
-              <span class="notes-label">Client-Facing Notes <span>· will be emailed to client</span></span>
+              <div class="notes-label-row">
+                <span class="notes-label">Client-Facing Notes <span>· will be emailed to client</span></span>
+                <button type="button" class="btn-expand" onclick="toggleNotesExpand(this)">⤢ Expand</button>
+              </div>
               <textarea class="needs-input ${cfnHasValue ? 'has-value' : ''}"
                         id="cfn-${d.id}"
                         data-deal="${d.id}"
@@ -1092,6 +1106,12 @@
     btn.textContent = 'Save Notes';
     btn.classList.remove('saved');
     btn.disabled = false;
+  }
+
+  function toggleNotesExpand(btn) {
+    const textarea = btn.closest('.note-block').querySelector('textarea.needs-input');
+    const expanded = textarea.classList.toggle('expanded');
+    btn.textContent = expanded ? '⤡ Collapse' : '⤢ Expand';
   }
 
   async function submitDeal(dealId) {
