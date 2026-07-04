@@ -101,6 +101,8 @@
     .initial-meeting { font-size: .76rem; color: #8b8fa8; }
     .initial-meeting-calendar { font-size: .72rem; color: #5c607a; }
     .initial-meeting-booking-link { font-size: .72rem; color: #5c607a; }
+    .initial-meeting-booking-link a { color: #7c8fd6; text-decoration: none; }
+    .initial-meeting-booking-link a:hover { text-decoration: underline; }
     .meta { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
     .meta-item { font-size: .8rem; color: #8b8fa8; display: flex; flex-direction: column; gap: 1px; }
     .meta-item strong { color: #c9cad8; font-weight: 600; }
@@ -1210,7 +1212,7 @@
           <a class="deal-name" href="https://app.hubspot.com/contacts/23416553/deal/${d.id}" target="_blank" rel="noopener">${esc(d.name)}</a>
           ${d.initial_meeting ? `<span class="initial-meeting">📅 ${esc(d.initial_meeting)}</span>` : ''}
           ${d.initial_meeting_calendar ? `<span class="initial-meeting-calendar">Calendar: ${esc(d.initial_meeting_calendar)}</span>` : ''}
-          ${d.initial_meeting_booking_link ? `<span class="initial-meeting-booking-link">Booking Link: ${esc(d.initial_meeting_booking_link)}</span>` : ''}
+          ${d.initial_meeting_booking_link ? `<span class="initial-meeting-booking-link">Booking Link: <a href="${esc(d.initial_meeting_booking_link)}" target="_blank" rel="noopener">${esc(d.initial_meeting_booking_link)}</a></span>` : ''}
         </div>
         <div class="meta">
           <div class="meta-item"><span>Created</span><strong>${esc(d.created)}</strong></div>

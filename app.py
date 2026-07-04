@@ -358,7 +358,8 @@ def get_initial_meeting_times(deal_ids):
             for field in ("first_conversion_event_name", "recent_conversion_event_name"):
                 val = props.get(field) or ""
                 if val.startswith("Meetings Link: "):
-                    contact_booking_links[r["id"]] = val[len("Meetings Link: "):]
+                    slug = val[len("Meetings Link: "):]
+                    contact_booking_links[r["id"]] = f"https://meetings.hubspot.com/{slug}"
                     break
 
     contact_to_meetings = {}
