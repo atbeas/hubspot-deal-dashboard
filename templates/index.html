@@ -189,31 +189,29 @@
     .meeting-empty { padding: 10px 12px; font-size: .84rem; color: #8b8fa8; }
     .btn-invite {
       padding: 9px 20px; border-radius: 7px; font-size: .88rem; font-weight: 600;
-      cursor: pointer; border: none; background: #2563eb; color: #fff;
+      cursor: pointer; border: none; background: #dc2626; color: #fff;
       white-space: nowrap; transition: background .15s, opacity .15s;
     }
-    .btn-invite:hover  { background: #1d4ed8; }
+    .btn-invite:hover  { background: #b91c1c; }
     .btn-invite:disabled { opacity: .5; cursor: not-allowed; }
     .btn-invite.invited { background: #22c55e; }
+    .btn-invite.invited:hover { background: #16a34a; }
     .btn-invite.sent { background: #22c55e; }
+    .btn-invite.sent:hover { background: #16a34a; }
 
     /* ── Step 7: archive ── */
-    .archive-footer {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 16px; padding: 14px 20px; border-top: 1px solid #252839;
-    }
     .btn-archive {
       padding: 9px 20px; border-radius: 7px; font-size: .88rem; font-weight: 600;
-      cursor: pointer; border: 1px solid #2a2d3e; background: rgba(255,255,255,.06);
-      color: #c9cad8; white-space: nowrap; transition: background .15s, color .15s;
-    }
-    .btn-archive:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
-    .btn-unarchive {
-      padding: 9px 20px; border-radius: 7px; font-size: .88rem; font-weight: 600;
-      cursor: pointer; border: none; background: #2563eb; color: #fff;
+      cursor: pointer; border: none; background: #dc2626; color: #fff;
       white-space: nowrap; transition: background .15s;
     }
-    .btn-unarchive:hover { background: #1d4ed8; }
+    .btn-archive:hover { background: #b91c1c; }
+    .btn-unarchive {
+      padding: 9px 20px; border-radius: 7px; font-size: .88rem; font-weight: 600;
+      cursor: pointer; border: none; background: #22c55e; color: #fff;
+      white-space: nowrap; transition: background .15s;
+    }
+    .btn-unarchive:hover { background: #16a34a; }
     .archived-badge { font-size: .78rem; color: #8b8fa8; }
 
     /* ── Notes (right column) ── */
@@ -1143,17 +1141,19 @@
               </button>
             </div>
           </div>
+          <div class="step-box">
+            <span class="step-label">Step 7 (archive the meeting)</span>
+            <div class="notes-footer">
+              ${d.archived
+                ? `<div style="display:flex; align-items:center; gap:12px;">
+                     <span class="archived-badge">Archived ${esc(d.archived_at)}</span>
+                     <button class="btn-unarchive" id="archive-${d.id}" onclick="unarchiveDeal('${d.id}')">↩ Unarchive</button>
+                   </div>`
+                : `<button class="btn-archive" id="archive-${d.id}" onclick="archiveDeal('${d.id}')">🗄 Archive Meeting</button>`
+              }
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="archive-footer">
-        <span class="step-label">Step 7 (archive the meeting)</span>
-        ${d.archived
-          ? `<div style="display:flex; align-items:center; gap:12px;">
-               <span class="archived-badge">Archived ${esc(d.archived_at)}</span>
-               <button class="btn-unarchive" id="archive-${d.id}" onclick="unarchiveDeal('${d.id}')">↩ Unarchive</button>
-             </div>`
-          : `<button class="btn-archive" id="archive-${d.id}" onclick="archiveDeal('${d.id}')">🗄 Archive Meeting</button>`
-        }
       </div>
     </div>`;
   }
