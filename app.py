@@ -90,7 +90,7 @@ DEFAULT_EMAIL_TEMPLATE = (
     "you prepare for our upcoming conversation:\n"
 )
 DEFAULT_HANDOFF_EMAIL_TEMPLATE = (
-    "Hi there,\n\n"
+    "Hi [[first_name]],\n\n"
     "It was great learning more about your business. As we move forward, we wanted to "
     "introduce you to your dedicated team:\n\n"
     "[[account_manager]] — Account Manager\n"
@@ -814,7 +814,11 @@ def get_deal_contact(deal_id):
 
     props = contact_resp.json().get("properties", {})
     name = f"{props.get('firstname','')} {props.get('lastname','')}".strip()
-    return jsonify({"email": props.get("email", "") or "", "name": name})
+    return jsonify({
+        "email": props.get("email", "") or "",
+        "name": name,
+        "first_name": props.get("firstname", "") or "",
+    })
 
 
 @app.route("/api/settings/handoff-email-template")

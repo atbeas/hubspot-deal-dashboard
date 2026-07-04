@@ -781,10 +781,12 @@
     selects.forEach(s => { roles[s.dataset.role] = s.value; });
 
     let customerEmail = '';
+    let customerFirstName = '';
     try {
       const r = await fetch(`/api/deals/${dealId}/contact`);
       const d = await r.json();
       customerEmail = d.email || '';
+      customerFirstName = d.first_name || '';
     } catch (e) { /* ignore */ }
     if (!customerEmail) return showToast('No customer email found on this deal', true);
 
@@ -796,6 +798,7 @@
 
     const template = await getHandoffEmailTemplate();
     const body = template
+      .replaceAll('[[first_name]]', customerFirstName || 'there')
       .replaceAll('[[account_manager]]', amName)
       .replaceAll('[[sales_executive]]', seName);
 
