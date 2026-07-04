@@ -555,7 +555,14 @@
 
   function findSuggestedMeeting(d) {
     if (!d.initial_meeting_start || !allMeetings.length) return null;
-    return allMeetings.find(m => m.start_utc && m.start_utc === d.initial_meeting_start) || null;
+    const candidates = allMeetings.filter(m => m.start_utc && m.start_utc === d.initial_meeting_start);
+    if (candidates.length <= 1) return candidates[0] || null;
+    // Two or more meetings booked for the exact same slot (a real double-booking
+    // on the calendar) — pick the one whose title actually matches this deal's
+    // company instead of arbitrarily taking whichever the calendar API listed first.
+    const company = (d.name || '').split('|')[0].trim().toLowerCase();
+    const titleMatch = company && candidates.find(m => m.label.toLowerCase().includes(company));
+    return titleMatch || candidates[0];
   }
 
   function ownerName(id) {
