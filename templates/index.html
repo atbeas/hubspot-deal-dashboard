@@ -170,6 +170,7 @@
     }
     .meeting-trigger.has-value { color: #e8e9f0; }
     .meeting-trigger.suggested { border-style: dashed; border-color: #fbbf24; }
+    .meeting-trigger.ambiguous { border-style: dashed; border-color: #f87171; color: #f87171; }
     .meeting-trigger:focus, .meeting-trigger.open { border-color: #ff5c35; outline: none; }
     .meeting-trigger .trigger-text {
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -553,16 +554,29 @@
     empty.style.display = visible ? 'none' : 'block';
   }
 
+  function meetingTimeCandidates(d) {
+    if (!d.initial_meeting_start || !allMeetings.length) return [];
+    return allMeetings.filter(m => m.start_utc && m.start_utc === d.initial_meeting_start);
+  }
+
   function findSuggestedMeeting(d) {
-    if (!d.initial_meeting_start || !allMeetings.length) return null;
-    const candidates = allMeetings.filter(m => m.start_utc && m.start_utc === d.initial_meeting_start);
-    if (candidates.length <= 1) return candidates[0] || null;
+    const candidates = meetingTimeCandidates(d);
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
     // Two or more meetings booked for the exact same slot (a real double-booking
-    // on the calendar) — pick the one whose title actually matches this deal's
-    // company instead of arbitrarily taking whichever the calendar API listed first.
+    // on the calendar) — only trust the one whose title actually matches this
+    // deal's company. If none match confidently, return null rather than
+    // guessing — an unresolved tie should be visibly flagged, not silently
+    // assigned to whichever meeting the calendar API happened to list first.
     const company = (d.name || '').split('|')[0].trim().toLowerCase();
-    const titleMatch = company && candidates.find(m => m.label.toLowerCase().includes(company));
-    return titleMatch || candidates[0];
+    return (company && candidates.find(m => m.label.toLowerCase().includes(company))) || null;
+  }
+
+  // True when there are multiple same-time calendar meetings and we couldn't
+  // confidently tell which one belongs to this deal — needs a human to pick.
+  function hasUnresolvedMeetingTie(d) {
+    const candidates = meetingTimeCandidates(d);
+    return candidates.length > 1 && !findSuggestedMeeting(d);
   }
 
   function ownerName(id) {
@@ -1138,9 +1152,15 @@
     const cfnHasValue   = !!d.client_facing_notes;
 
     const suggestedMeeting = !d.meeting_id ? findSuggestedMeeting(d) : null;
+    const ambiguousTie = !d.meeting_id && !suggestedMeeting && hasUnresolvedMeetingTie(d);
     const meetingValue = d.meeting_id || (suggestedMeeting ? suggestedMeeting.id : '');
-    const meetingText  = d.meeting_label || (suggestedMeeting ? suggestedMeeting.label : '— Select meeting —');
-    const meetingTriggerCls = d.meeting_id ? 'has-value' : (suggestedMeeting ? 'has-value suggested' : '');
+    const meetingText  = d.meeting_label
+      || (suggestedMeeting ? suggestedMeeting.label : '')
+      || (ambiguousTie ? '⚠ Multiple meetings at this time — select manually' : '— Select meeting —');
+    const meetingTriggerCls = d.meeting_id ? 'has-value'
+      : suggestedMeeting ? 'has-value suggested'
+      : ambiguousTie ? 'ambiguous'
+      : '';
     const conflictsHtml = conflictPanelHtml(d);
 
     return `
