@@ -25,12 +25,10 @@
       box-shadow: 0 4px 24px rgba(0,0,0,.07);
       text-align: center;
     }
-    .logo {
-      width: 52px; height: 52px;
-      background: #ff5c35;
-      border-radius: 14px;
-      display: flex; align-items: center; justify-content: center;
-      margin: 0 auto 20px;
+    .brand-logo {
+      width: 180px; height: auto;
+      display: block;
+      margin: 0 auto 24px;
     }
     h1 { font-size: 1.2rem; font-weight: 700; color: #1a1a2e; margin-bottom: 4px; }
     p  { font-size: .85rem; color: #6b7280; margin-bottom: 28px; }
@@ -65,11 +63,7 @@
 </head>
 <body>
   <div class="card">
-    <div class="logo">
-      <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
-        <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    </div>
+    <img class="brand-logo" src="{{ url_for('static', filename='runway_logo.png') }}" alt="Runway Selling" />
     <h1>Deal Allocation Dashboard</h1>
     <p>Enter your password to continue</p>
 
