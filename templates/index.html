@@ -292,7 +292,7 @@
     <p>Assign Client, Sales Development, Account Manager, and Sales Executive to new deals</p>
   </div>
   <div class="header-nav">
-    <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">📊 KPIs</a>
+    <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
     <div class="nav-dropdown">
       <button class="nav-dropdown-btn" onclick="toggleSD(event)">Sales Dev</button>
       <div class="nav-dropdown-menu">
@@ -300,9 +300,9 @@
         <a href="/roslyn">Roslyn Yee</a>
       </div>
     </div>
-    <a href="#" class="nav-link" id="archiveTabLink" onclick="toggleArchiveView(event)">🗄 Archived Meetings</a>
-    <a href="/admin" class="nav-link">🔐 Admin</a>
-    <a href="/settings" class="nav-link">⚙ Settings</a>
+    <a href="#" class="nav-link" id="archiveTabLink" onclick="toggleArchiveView(event)">Archived Meetings</a>
+    <a href="/admin" class="nav-link">Admin</a>
+    <a href="/settings" class="nav-link">Settings</a>
     <a href="/logout" class="nav-link">Log Out</a>
   </div>
 </header>
@@ -944,7 +944,7 @@
     e.preventDefault();
     showArchived = !showArchived;
     document.getElementById('archiveTabLink').classList.toggle('active', showArchived);
-    document.getElementById('archiveTabLink').textContent = showArchived ? '🗄 Back to Active Deals' : '🗄 Archived Meetings';
+    document.getElementById('archiveTabLink').textContent = showArchived ? 'Back to Active Deals' : 'Archived Meetings';
     if (document.getElementById('startDate').value && document.getElementById('endDate').value) {
       loadDeals();
     } else {
