@@ -157,6 +157,7 @@
     .btn-submit:disabled { opacity: .5; cursor: not-allowed; background: #dc2626; }
     .btn-submit.saved { background: #22c55e; }
     .btn-submit.saved:hover { background: #16a34a; }
+    .btn-submit.small { padding: 6px 14px; font-size: .78rem; }
 
     /* ── Meeting invite row (left column) ── */
     .meeting-row {
@@ -1234,6 +1235,7 @@
     const allFilled = ROLE_KEYS.every(hasValue);
     const statusCls = allFilled ? 'saved' : '';
     const inviteStatusCls = d.meeting_id ? 'invited' : '';
+    const sdNotesStatusCls = d.business_needs ? 'saved' : '';
     const notesStatusCls = d.client_facing_notes ? 'saved' : '';
     const sentCls = d.prep_email_sent ? 'sent' : '';
     const handoffSentCls = d.handoff_email_sent ? 'sent' : '';
@@ -1300,6 +1302,12 @@
                           data-deal="${d.id}"
                           placeholder="Prospective Customer's top business or technology concerns, challenges, initiatives, and goal."
                           oninput="markNeedsDirty(this)">${esc(d.business_needs)}</textarea>
+                <div class="notes-footer">
+                  <button class="btn-submit small ${sdNotesStatusCls}" id="sdnotesbtn-${d.id}"
+                          onclick="submitSdNotes('${d.id}')">
+                    ${d.business_needs ? '✓ Saved' : 'Save / Override Notes'}
+                  </button>
+                </div>
               </div>
             </div>
             <div class="step-box">
@@ -1428,8 +1436,9 @@
   function markNeedsDirty(textarea) {
     textarea.classList.remove('has-value');
     textarea.classList.add('dirty');
-    const btn = document.getElementById(`notesbtn-${textarea.dataset.deal}`);
-    btn.textContent = 'Save Notes';
+    const isSdNotes = textarea.id.startsWith('needs-');
+    const btn = document.getElementById(isSdNotes ? `sdnotesbtn-${textarea.dataset.deal}` : `notesbtn-${textarea.dataset.deal}`);
+    btn.textContent = isSdNotes ? 'Save / Override Notes' : 'Save Notes';
     btn.classList.remove('saved');
     btn.disabled = false;
   }
@@ -1481,14 +1490,9 @@
     }
   }
 
-  async function submitNotes(dealId) {
-    const textarea    = document.getElementById(`needs-${dealId}`);
-    const cfnTextarea  = document.getElementById(`cfn-${dealId}`);
-    const btn = document.getElementById(`notesbtn-${dealId}`);
-
-    const payload = {};
-    if (textarea) payload.business_needs = textarea.value;
-    if (cfnTextarea) payload.client_facing_notes = cfnTextarea.value;
+  async function submitSdNotes(dealId) {
+    const textarea = document.getElementById(`needs-${dealId}`);
+    const btn = document.getElementById(`sdnotesbtn-${dealId}`);
 
     btn.disabled = true;
     btn.textContent = 'Saving…';
@@ -1497,24 +1501,48 @@
       const resp = await fetch(`/api/deals/${dealId}`, {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ business_needs: textarea.value }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Save failed');
 
-      // Update local state
       const deal = allDeals.find(d => d.id === dealId);
-      if (deal) Object.assign(deal, payload);
+      if (deal) deal.business_needs = textarea.value;
 
-      // Update UI
-      if (textarea) {
-        textarea.classList.remove('dirty');
-        textarea.classList.toggle('has-value', !!textarea.value);
-      }
-      if (cfnTextarea) {
-        cfnTextarea.classList.remove('dirty');
-        cfnTextarea.classList.toggle('has-value', !!cfnTextarea.value);
-      }
+      textarea.classList.remove('dirty');
+      textarea.classList.toggle('has-value', !!textarea.value);
+      btn.textContent = '✓ Saved';
+      btn.classList.add('saved');
+      btn.disabled = false;
+      showToast('SD notes updated in HubSpot');
+    } catch(e) {
+      btn.textContent = 'Save / Override Notes';
+      btn.disabled = false;
+      showToast('Failed to save notes — ' + e.message, true);
+    }
+  }
+
+  async function submitNotes(dealId) {
+    const cfnTextarea = document.getElementById(`cfn-${dealId}`);
+    const btn = document.getElementById(`notesbtn-${dealId}`);
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      const resp = await fetch(`/api/deals/${dealId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ client_facing_notes: cfnTextarea.value }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Save failed');
+
+      const deal = allDeals.find(d => d.id === dealId);
+      if (deal) deal.client_facing_notes = cfnTextarea.value;
+
+      cfnTextarea.classList.remove('dirty');
+      cfnTextarea.classList.toggle('has-value', !!cfnTextarea.value);
       btn.textContent = '✓ Saved';
       btn.classList.add('saved');
       btn.disabled = false;
