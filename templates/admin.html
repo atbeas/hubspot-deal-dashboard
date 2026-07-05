@@ -35,7 +35,13 @@
       padding: 20px 22px; margin-bottom: 16px;
     }
     .company-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .company-name-row { display: flex; align-items: center; gap: 10px; }
     .company-name { font-size: 1rem; font-weight: 700; color: #1a1a2e; }
+    .company-page-link {
+      font-size: .8rem; font-weight: 600; color: #ff5c35; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 3px;
+    }
+    .company-page-link:hover { text-decoration: underline; }
     .status-badge {
       font-size: .72rem; font-weight: 700; padding: 3px 9px; border-radius: 20px;
       text-transform: uppercase; letter-spacing: .3px;
@@ -134,7 +140,10 @@
   {% for c in companies %}
   <div class="company-card" id="card-{{ c.key }}">
     <div class="company-top">
-      <div class="company-name">{{ c.label }}</div>
+      <div class="company-name-row">
+        <div class="company-name">{{ c.label }}</div>
+        <a class="company-page-link" href="{{ c.page_url }}" target="_blank" rel="noopener">↗ View page</a>
+      </div>
       {% if c.has_custom_password %}
       <div class="status-badge custom">Custom password set</div>
       {% else %}

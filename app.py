@@ -841,12 +841,15 @@ def submit_quick_note(company, deal_id):
 @app.route("/admin")
 @login_required
 def admin():
+    company_domains = {v: k for k, v in QUICK_NOTES_HOST_MAP.items()}
     companies = []
     for key, cfg in QUICK_NOTES_COMPANIES.items():
+        domain = company_domains.get(key)
         companies.append({
             "key": key,
             "label": cfg["label"],
             "has_custom_password": get_company_password_hash(key) is not None,
+            "page_url": f"https://{domain}" if domain else url_for("quick_notes", company=key),
         })
 
     calendars = []
