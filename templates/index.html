@@ -1225,7 +1225,8 @@
 
   function clientOptions(selectedValue) {
     const none = `<option value="">— Select client —</option>`;
-    return none + CLIENT_OPTIONS.map(o =>
+    const list = CLIENT_OPTIONS.filter(o => o.enabled !== false || o.value === selectedValue);
+    return none + list.map(o =>
       `<option value="${esc(o.value)}" ${o.value === selectedValue ? 'selected' : ''}>${esc(o.label)}</option>`
     ).join('');
   }

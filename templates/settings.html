@@ -44,10 +44,11 @@
     }
     .client-row {
       display: grid;
-      grid-template-columns: 220px 1fr 1fr 1fr 90px;
+      grid-template-columns: 200px 1fr 1fr 1fr 90px 70px;
       gap: 12px; align-items: center;
       padding: 12px 20px; border-bottom: 1px solid #f0f0f0;
     }
+    .client-row.header-row .col-check { text-align: center; }
     .client-row:last-child { border-bottom: none; }
     .client-row.header-row {
       background: #f9fafb; padding: 10px 20px;
@@ -161,7 +162,7 @@
 <div class="page-wrap">
   <div class="page-header">
     <h2>Client Contact Emails</h2>
-    <p>Add up to 3 email addresses per client. These will be pre-filled in the "Add to Invite" confirmation when that client is assigned to a deal.</p>
+    <p>Add up to 3 email addresses per client. These will be pre-filled in the "Add to Invite" confirmation when that client is assigned to a deal. Uncheck "Active" to hide a client from the Client dropdown when assigning deals — it stays visible on any deal it's already assigned to.</p>
   </div>
 
   <div class="search-bar">
@@ -175,6 +176,7 @@
       <div>Contact Email 2</div>
       <div>Contact Email 3</div>
       <div></div>
+      <div class="col-check">Active</div>
     </div>
     {% for c in client_options %}
     <div class="client-row" data-label="{{ c.label | lower }}" id="row-{{ c.value }}">
@@ -187,6 +189,10 @@
              value="{{ c.email3 }}" oninput="markDirty(this, '{{ c.value }}')" />
       <button class="btn-save" id="savebtn-{{ c.value }}"
               onclick="saveClient('{{ c.value }}', this)">Save</button>
+      <div class="col-check">
+        <input type="checkbox" {{ 'checked' if c.enabled }}
+               onchange="setClientEligibility('{{ c.value }}', this.checked, this)" />
+      </div>
     </div>
     {% endfor %}
   </div>
@@ -334,6 +340,24 @@
       showToast(`${roleLabel} eligibility updated`);
     } catch (e) {
       checkbox.checked = !eligible;
+      showToast('Failed to save', true);
+    } finally {
+      checkbox.disabled = false;
+    }
+  }
+
+  async function setClientEligibility(clientValue, enabled, checkbox) {
+    checkbox.disabled = true;
+    try {
+      const resp = await fetch(`/api/clients/${encodeURIComponent(clientValue)}/eligibility`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      showToast(enabled ? 'Client shown in dropdown' : 'Client hidden from dropdown');
+    } catch (e) {
+      checkbox.checked = !enabled;
       showToast('Failed to save', true);
     } finally {
       checkbox.disabled = false;

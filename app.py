@@ -88,6 +88,12 @@ def init_db():
                 archived_at TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS client_eligibility (
+                client_value TEXT PRIMARY KEY,
+                enabled INTEGER DEFAULT 1
+            )
+        """)
 
 init_db()
 
@@ -328,8 +334,9 @@ def index():
     )
     if resp.ok:
         data = resp.json()
+        client_eligibility = get_client_eligibility()
         client_options = [
-            {"label": o["label"], "value": o["value"]}
+            {"label": o["label"], "value": o["value"], "enabled": client_eligibility.get(o["value"], True)}
             for o in data.get("options", [])
             if not o.get("hidden")
         ]
@@ -371,6 +378,12 @@ def get_owner_eligibility():
         r["owner_id"]: {"am": bool(r["eligible_am"]), "se": bool(r["eligible_se"]), "sd": bool(r["eligible_sd"])}
         for r in rows
     }
+
+
+def get_client_eligibility():
+    with get_db() as conn:
+        rows = conn.execute("SELECT client_value, enabled FROM client_eligibility").fetchall()
+    return {r["client_value"]: bool(r["enabled"]) for r in rows}
 
 
 def get_deal_meetings():
@@ -1210,11 +1223,13 @@ def settings():
     with get_db() as conn:
         rows = {r["client_value"]: dict(r) for r in conn.execute("SELECT * FROM client_contacts")}
 
+    client_eligibility = get_client_eligibility()
     for c in client_options:
         saved = rows.get(c["value"], {})
         c["email1"] = saved.get("email1", "")
         c["email2"] = saved.get("email2", "")
         c["email3"] = saved.get("email3", "")
+        c["enabled"] = client_eligibility.get(c["value"], True)
 
     owners = fetch_hubspot_owners()
     eligibility = get_owner_eligibility()
@@ -1257,6 +1272,20 @@ def save_client(client_value):
                 email2 = excluded.email2,
                 email3 = excluded.email3
         """, [client_value] + emails)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/clients/<client_value>/eligibility", methods=["POST"])
+@login_required
+def set_client_eligibility(client_value):
+    body = request.get_json()
+    enabled = 1 if body.get("enabled") else 0
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO client_eligibility (client_value, enabled)
+            VALUES (?, ?)
+            ON CONFLICT(client_value) DO UPDATE SET enabled = excluded.enabled
+        """, [client_value, enabled])
     return jsonify({"ok": True})
 
 
