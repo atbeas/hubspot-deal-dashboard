@@ -873,6 +873,10 @@
     return `${list.slice(0, -1).join(', ')}, and ${list[list.length - 1]}`;
   }
 
+  function firstNameOf(fullName) {
+    return (fullName || '').trim().split(/\s+/)[0] || '';
+  }
+
   async function openSendEmailModal(dealId) {
     const deal = allDeals.find(d => d.id === dealId);
     if (!deal) return;
@@ -913,7 +917,7 @@
     const template = await getEmailTemplate(deal.meeting_calendar);
     const subjectTemplate = await getEmailSubjectTemplate(deal.meeting_calendar);
     const clientLabel = CLIENT_OPTIONS.find(o => o.value === clientValue)?.label || deal.name;
-    const greetingNames = clientNames.filter(Boolean);
+    const greetingNames = clientNames.map(firstNameOf).filter(Boolean);
     const clientGreetingName = greetingNames.length ? joinWithAnd(greetingNames) : 'there';
 
     const toContainer = document.getElementById('emailModalTo');

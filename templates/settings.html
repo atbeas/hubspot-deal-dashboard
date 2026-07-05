@@ -271,7 +271,7 @@
   </div>
 
   <div class="template-subhead">Prep Email Template</div>
-  <p style="font-size:.85rem; color:#6b7280; margin-bottom:10px;">This intro text is prepended to the Client-Facing Notes when sending the "Send Prep Email" from a deal card. Always sent from Runway Selling regardless of calendar. Only available once Step 3 (add the team to the meeting invite) is complete on a deal. Can still be edited per-email before sending. Use <code>[[client_name]]</code> to greet the client contact(s) on file by name (falls back to "there" if no name is on file for that client).</p>
+  <p style="font-size:.85rem; color:#6b7280; margin-bottom:10px;">This intro text is prepended to the Client-Facing Notes when sending the "Send Prep Email" from a deal card. Always sent from Runway Selling regardless of calendar. Only available once Step 3 (add the team to the meeting invite) is complete on a deal. Can still be edited per-email before sending. Use <code>[[client_name]]</code> to greet the client contact(s) on file by first name only (contacts with no name on file are skipped; falls back to "there" if none of the client's contacts have a name on file).</p>
 
   <label class="subject-label" for="emailSubjectInput">Subject line — use <code>[[company]]</code> and <code>[[client]]</code> as placeholders</label>
   <input type="text" id="emailSubjectInput" class="email-subject-input"
