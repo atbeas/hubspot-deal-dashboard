@@ -27,28 +27,6 @@
     .nav-link:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
     .nav-link.active { background: #ff5c35; color: #fff; border-color: #ff5c35; }
 
-    /* ── SD dropdown ── */
-    .nav-dropdown { position: relative; }
-    .nav-dropdown-btn {
-      padding: 7px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600;
-      color: #c9cad8; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); cursor: pointer;
-      transition: background .15s; display: flex; align-items: center; gap: 6px;
-    }
-    .nav-dropdown-btn:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
-    .nav-dropdown-btn::after { content: '▾'; font-size: .75rem; }
-    .nav-dropdown-menu {
-      display: none; position: absolute; top: 100%; right: 0; margin-top: 6px;
-      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 8px;
-      box-shadow: 0 8px 28px rgba(0,0,0,.5); min-width: 170px; overflow: hidden; z-index: 100;
-    }
-    .nav-dropdown.open .nav-dropdown-menu { display: block; }
-    .nav-dropdown-menu a {
-      display: block; padding: 10px 16px; font-size: .87rem; font-weight: 500;
-      color: #c9cad8; text-decoration: none; transition: background .1s;
-    }
-    .nav-dropdown-menu a:hover { background: #252839; color: #e8e9f0; }
-    .nav-dropdown-menu a.active { color: #ff5c35; font-weight: 700; }
-
     /* ── Filter bar ── */
     .filters {
       background: #181a24; border-bottom: 1px solid #2a2d3e;
@@ -351,13 +329,6 @@
   </div>
   <div class="header-nav">
     <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
-    <div class="nav-dropdown">
-      <button class="nav-dropdown-btn" onclick="toggleSD(event)">Sales Dev</button>
-      <div class="nav-dropdown-menu">
-        <a href="/cameron">Cameron Whitmore</a>
-        <a href="/roslyn">Roslyn Yee</a>
-      </div>
-    </div>
     <a href="#" class="nav-link" id="archiveTabLink" onclick="toggleArchiveView(event)">Archived Meetings</a>
     <a href="/admin" class="nav-link">Admin</a>
     <a href="/settings" class="nav-link">Settings</a>
@@ -493,13 +464,6 @@
 </div>
 
 <script>
-  function toggleSD(e) {
-    e.stopPropagation();
-    document.querySelector('.nav-dropdown').classList.toggle('open');
-  }
-  document.addEventListener('click', () => {
-    document.querySelector('.nav-dropdown')?.classList.remove('open');
-  });
   let allOwners   = [];
   let allDeals    = [];
   let otherBucketDeals = []; // opposite archived/active bucket, same date range — conflict-check lookup only
