@@ -506,8 +506,8 @@
   let showArchived = false;
   let allMeetings = [];
 
-  // Client options come from the server (rs_partner enum)
-  const CLIENT_OPTIONS = {{ client_options | tojson }};
+  // Client options come from the server (rs_partner enum), alphabetized for easier scanning
+  const CLIENT_OPTIONS = ({{ client_options | tojson }}).sort((a, b) => a.label.localeCompare(b.label));
 
   // Every calendar mailbox the app is wired to — used to show a friendly
   // label next to meetings instead of a raw mailbox address.
@@ -535,7 +535,7 @@
     try {
       const r = await fetch('/api/owners');
       const d = await r.json();
-      allOwners = d.owners || [];
+      allOwners = (d.owners || []).sort((a, b) => a.name.localeCompare(b.name));
     } catch(e) {
       console.warn('Could not load owners:', e);
     }
