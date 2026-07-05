@@ -98,7 +98,7 @@ SCHEDULING_EMAIL = "scheduling@10talent.tech"
 # Every calendar mailbox the app pulls meetings from / books invites on.
 # Add an entry here when a new calendar is wired up.
 CONNECTED_CALENDARS = [
-    {"email": SCHEDULING_EMAIL, "label": "10talent Tech Scheduling"},
+    {"email": SCHEDULING_EMAIL, "label": "10talent Tech"},
     {"email": "info@runwayselling.com", "label": "Runway Selling"},
 ]
 PREP_EMAIL_FROM  = "info@runwayselling.com"
