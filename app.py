@@ -2,6 +2,7 @@ import os
 import sqlite3
 import secrets
 import requests
+import concurrent.futures
 from functools import wraps
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for
 from datetime import datetime, timezone, timedelta
@@ -1323,6 +1324,271 @@ def get_client(client_value):
             "names":  [row["name1"], row["name2"], row["name3"]],
         })
     return jsonify({"emails": ["", "", ""], "names": ["", "", ""]})
+
+
+
+# ---------------------------------------------------------------------------
+# HS Workflows tab — read-only visual map of every HubSpot automation flow
+# (Automation v4 API), plus best-effort structural issue detection. Nothing
+# here is cached to disk; it's rebuilt from HubSpot on each cache expiry.
+# ---------------------------------------------------------------------------
+
+OBJECT_TYPE_LABELS = {"0-1": "Contact", "0-2": "Company", "0-3": "Deal", "0-5": "Ticket"}
+
+# Custom behavioral event IDs seen in this portal's meeting-booking triggers
+# (see project_hubspot_workflows memory) — used only to make trigger text
+# readable and to flag the known WF4-style duplicate-enrollment bug pattern.
+KNOWN_EVENT_TYPES = {
+    "4-1720599": "Meeting booked via meetings link",
+    "4-1639801": "Meeting associated with contact",
+}
+
+_HS_WORKFLOWS_CACHE = {"data": None, "ts": 0}
+HS_WORKFLOWS_CACHE_TTL = 600  # seconds
+
+
+def get_all_flows():
+    flows = []
+    after = None
+    while True:
+        params = {"limit": 100}
+        if after:
+            params["after"] = after
+        resp = requests.get(f"{BASE_URL}/automation/v4/flows", headers=HEADERS, params=params)
+        if not resp.ok:
+            break
+        data = resp.json()
+        flows.extend(data.get("results", []))
+        after = data.get("paging", {}).get("next", {}).get("after")
+        if not after:
+            break
+    return flows
+
+
+def get_flow_detail(flow_id):
+    resp = requests.get(f"{BASE_URL}/automation/v4/flows/{flow_id}", headers=HEADERS)
+    if not resp.ok:
+        return None
+    return resp.json()
+
+
+def _describe_filter(f):
+    ftype = f.get("filterType")
+    if ftype == "FORM_SUBMISSION":
+        form_id = f.get("formId", "")
+        return f"form submitted ({form_id[:8]}…)"
+    if ftype == "PROPERTY":
+        prop = f.get("property", "?")
+        op = f.get("operation", {}) or {}
+        operator = op.get("operator", "")
+        values = op.get("values") or []
+        if values:
+            return f"{prop} {operator} {', '.join(str(v) for v in values)}"
+        return f"{prop} {operator}".strip()
+    return ftype or "filter"
+
+
+def _describe_filter_branch(fb):
+    if not fb:
+        return ""
+    parts = [_describe_filter(f) for f in fb.get("filters", [])]
+    for nested in fb.get("filterBranches", []):
+        text = _describe_filter_branch(nested)
+        if text:
+            parts.append(f"({text})")
+    joiner = f" {fb.get('filterBranchOperator', 'AND')} "
+    return joiner.join(p for p in parts if p)
+
+
+def _describe_trigger(criteria):
+    if not criteria:
+        return "(no enrollment trigger data)", []
+    issues = []
+    parts = []
+
+    event_branches = criteria.get("eventFilterBranches") or []
+    for fb in event_branches:
+        event_id = fb.get("eventTypeId")
+        event_label = KNOWN_EVENT_TYPES.get(event_id, event_id or "event")
+        op = fb.get("operator", "")
+        cond_text = _describe_filter_branch(fb)
+        piece = event_label + (f" ({op})" if op else "")
+        if cond_text:
+            piece += f" — where {cond_text}"
+        parts.append(piece)
+
+    if criteria.get("listFilterBranch"):
+        text = _describe_filter_branch(criteria["listFilterBranch"])
+        if text:
+            parts.append(text)
+
+    if not parts:
+        parts.append((criteria.get("type") or "Unknown trigger").replace("_", " ").title())
+
+    summary = " OR ".join(p for p in parts if p)
+    if criteria.get("shouldReEnroll"):
+        summary += " · re-enrolls every time"
+
+    event_ids = {fb.get("eventTypeId") for fb in event_branches}
+    if {"4-1639801", "4-1720599"}.issubset(event_ids):
+        issues.append(
+            "Enrollment trigger fires on both 'Meeting booked' and 'Meeting associated with "
+            "contact' — known bug pattern that causes duplicate enrollments per meeting"
+        )
+
+    return summary, issues
+
+
+def _describe_action(a):
+    atid = a.get("actionTypeId") or ""
+    fields = a.get("fields", {}) or {}
+    issues = []
+    if atid == "0-1":
+        delta = fields.get("delta", "?")
+        unit = (fields.get("time_unit") or "").lower()
+        return f"Delay {delta} {unit}".strip(), "", issues
+    if atid == "0-8":
+        subject = fields.get("subject", "")
+        n = len(fields.get("user_ids") or [])
+        if n == 0:
+            issues.append(f"Send-email action \"{subject or a.get('actionId')}\" has no recipients configured")
+        return "Send internal email", f'"{subject}" to {n} user(s)', issues
+    if atid == "0-14":
+        obj = fields.get("object_type_id", "")
+        obj_label = OBJECT_TYPE_LABELS.get(obj, obj)
+        props = fields.get("properties") or []
+        return f"Create {obj_label.lower()} record", f"sets {len(props)} propert{'y' if len(props) == 1 else 'ies'}", issues
+    if atid == "0-5":
+        prop = fields.get("property_name", "?")
+        return "Set property", prop, issues
+    if atid.startswith("1-"):
+        if "slackChannelIds" in fields or "slackUserIds" in fields:
+            chans = fields.get("slackChannelIds") or []
+            users = fields.get("slackUserIds") or []
+            if not chans and not users:
+                issues.append("Slack notification action has no channel or user configured")
+            return "Send Slack message", f"{len(chans)} channel(s), {len(users)} user(s)", issues
+        return "Custom action", f"type {atid}", issues
+    return "Action", f"type {atid or a.get('type', '?')}", issues
+
+
+def _walk_flow(actions, start_id):
+    by_id = {a["actionId"]: a for a in actions if a.get("actionId")}
+    issues = []
+
+    def walk(action_id, visited):
+        if not action_id:
+            return None
+        if action_id in visited:
+            issues.append(f"Loop detected — action {action_id} connects back to an earlier step")
+            return None
+        if action_id not in by_id:
+            issues.append(f"Broken link — step references action {action_id}, which does not exist")
+            return None
+        visited = visited | {action_id}
+        a = by_id[action_id]
+        node = {"id": action_id}
+        if a.get("type") == "LIST_BRANCH":
+            branch_list = a.get("listBranches", []) or []
+            branches = []
+            for b in branch_list:
+                condition = _describe_filter_branch(b.get("filterBranch") or {})
+                child = walk((b.get("connection") or {}).get("nextActionId"), visited)
+                branches.append({
+                    "name": b.get("branchName") or "(unnamed branch)",
+                    "condition": condition,
+                    "step": child,
+                })
+            node.update({
+                "label": "Branch",
+                "detail": f"{len(branch_list)} branch(es)",
+                "branches": branches,
+                "next": None,
+            })
+            if len(branch_list) >= 17:
+                issues.append(f"Branch step ({action_id}) has {len(branch_list)} branches — at HubSpot's 17-branch hard limit")
+            elif len(branch_list) >= 15:
+                issues.append(f"Branch step ({action_id}) has {len(branch_list)} branches — approaching the 17-branch limit")
+        else:
+            label, detail, extra_issues = _describe_action(a)
+            issues.extend(extra_issues)
+            node.update({
+                "label": label,
+                "detail": detail,
+                "branches": None,
+                "next": walk((a.get("connection") or {}).get("nextActionId"), visited),
+            })
+        return node
+
+    root = walk(start_id, set())
+    return root, issues
+
+
+def build_flow_summary(flow_entry, detail):
+    if not detail:
+        return {
+            "id": flow_entry["id"],
+            "name": flow_entry.get("name") or "(unnamed)",
+            "enabled": flow_entry.get("isEnabled", False),
+            "object_type": OBJECT_TYPE_LABELS.get(flow_entry.get("objectTypeId"), flow_entry.get("objectTypeId", "")),
+            "updated_at": flow_entry.get("updatedAt", ""),
+            "trigger": "(could not load workflow detail)",
+            "steps": None,
+            "issues": ["Could not load this workflow's detail from HubSpot"],
+            "issue_count": 1,
+        }
+
+    trigger_text, trigger_issues = _describe_trigger(detail.get("enrollmentCriteria"))
+    issues = list(trigger_issues)
+
+    actions = detail.get("actions", []) or []
+    start_id = detail.get("startActionId")
+    by_id = {a["actionId"]: a for a in actions if a.get("actionId")}
+    if start_id and start_id not in by_id:
+        issues.append(f"Start action {start_id} is missing — this workflow cannot run")
+
+    steps, walk_issues = _walk_flow(actions, start_id)
+    issues.extend(walk_issues)
+
+    return {
+        "id": flow_entry["id"],
+        "name": flow_entry.get("name") or "(unnamed)",
+        "enabled": flow_entry.get("isEnabled", False),
+        "object_type": OBJECT_TYPE_LABELS.get(flow_entry.get("objectTypeId"), flow_entry.get("objectTypeId", "")),
+        "updated_at": flow_entry.get("updatedAt", ""),
+        "trigger": trigger_text,
+        "steps": steps,
+        "issues": issues,
+        "issue_count": len(issues),
+    }
+
+
+@app.route("/hs-workflows")
+@login_required
+def hs_workflows_page():
+    return render_template("hs_workflows.html")
+
+
+@app.route("/api/hs-workflows")
+@login_required
+def api_hs_workflows():
+    force = request.args.get("refresh") == "1"
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _HS_WORKFLOWS_CACHE["data"]
+    if not force and cached and (now_ts - _HS_WORKFLOWS_CACHE["ts"] < HS_WORKFLOWS_CACHE_TTL):
+        return jsonify(cached)
+
+    flows = get_all_flows()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+        details = list(ex.map(lambda f: get_flow_detail(f["id"]), flows))
+
+    summaries = [build_flow_summary(f, d) for f, d in zip(flows, details)]
+    summaries.sort(key=lambda s: (not s["enabled"], s["name"].lower()))
+
+    payload = {"workflows": summaries, "generated_at": datetime.now(timezone.utc).isoformat()}
+    _HS_WORKFLOWS_CACHE["data"] = payload
+    _HS_WORKFLOWS_CACHE["ts"] = now_ts
+    return jsonify(payload)
 
 
 if __name__ == "__main__":

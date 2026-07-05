@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HS Workflows — Deal Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #f4f5f7; color: #1a1a2e; min-height: 100vh; }
+
+    header {
+      background: #ff5c35; color: #fff;
+      padding: 16px 32px; display: flex; align-items: center; gap: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; }
+    header p  { font-size: .82rem; opacity: .85; margin-top: 1px; }
+    .header-nav { margin-left: auto; display: flex; gap: 10px; }
+    .nav-link {
+      padding: 7px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600;
+      text-decoration: none; color: #fff; background: rgba(255,255,255,.2);
+      transition: background .15s;
+    }
+    .nav-link:hover { background: rgba(255,255,255,.3); }
+
+    .page-wrap { max-width: 880px; margin: 32px auto; padding: 0 24px 60px; }
+
+    .summary-bar {
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 12px;
+      padding: 14px 20px; margin-bottom: 20px; font-size: .9rem;
+    }
+    .summary-meta { display: flex; align-items: center; gap: 10px; font-size: .8rem; color: #9ca3af; }
+    .btn-refresh {
+      padding: 6px 14px; border-radius: 6px; border: 1px solid #d1d5db; background: #fff;
+      font-size: .8rem; font-weight: 600; color: #1a1a2e; cursor: pointer; transition: background .15s;
+    }
+    .btn-refresh:hover { background: #f4f5f7; }
+
+    .wf-card {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 12px;
+      margin-bottom: 12px; overflow: hidden;
+    }
+    .wf-card-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 14px 18px; cursor: pointer; flex-wrap: wrap;
+    }
+    .wf-card-head:hover { background: #fafafb; }
+    .wf-name-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .wf-name { font-size: .95rem; font-weight: 700; color: #1a1a2e; }
+    .wf-objtype { font-size: .75rem; color: #9ca3af; }
+
+    .status-badge {
+      font-size: .7rem; font-weight: 700; padding: 3px 9px; border-radius: 20px;
+      text-transform: uppercase; letter-spacing: .3px; white-space: nowrap;
+    }
+    .status-badge.connected { background: #dcfce7; color: #15803d; }
+    .status-badge.default   { background: #f3f4f6; color: #6b7280; }
+    .status-badge.error     { background: #fee2e2; color: #b91c1c; }
+
+    .wf-card-body { padding: 0 18px 18px; border-top: 1px solid #f0f1f4; }
+    .wf-trigger { font-size: .82rem; color: #4b5563; padding: 12px 0 4px; }
+    .wf-trigger strong { color: #1a1a2e; }
+
+    .issue-list {
+      background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
+      padding: 10px 14px; margin: 10px 0; display: flex; flex-direction: column; gap: 4px;
+    }
+    .issue-item { color: #b91c1c; font-size: .8rem; }
+
+    .wf-steps { margin-top: 12px; }
+    .step-box {
+      background: #f4f5f7; border: 1px solid #e2e4e9; border-radius: 8px;
+      padding: 9px 14px; margin-bottom: 6px;
+    }
+    .step-label { font-size: .84rem; font-weight: 600; color: #1a1a2e; }
+    .step-detail { font-size: .76rem; color: #6b7280; margin-top: 1px; }
+
+    .branch-block {
+      margin-left: 18px; padding-left: 14px; margin-top: 4px; margin-bottom: 10px;
+      border-left: 2px dashed #d1d5db;
+    }
+    .branch-name { font-size: .8rem; font-weight: 700; color: #ff5c35; margin-bottom: 2px; }
+    .branch-condition { font-size: .72rem; color: #9ca3af; font-family: 'SF Mono', Menlo, monospace; margin-bottom: 6px; }
+
+    .empty-state { text-align: center; padding: 40px 0; color: #9ca3af; font-size: .9rem; }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="rgba(255,255,255,.2)"/>
+    <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>HS Workflows</h1>
+    <p>Live visual map of every HubSpot automation workflow, pulled from the Automation API</p>
+  </div>
+  <div class="header-nav">
+    <a href="/" class="nav-link">← Dashboard</a>
+    <a href="/logout" class="nav-link">Log Out</a>
+  </div>
+</header>
+
+<div class="page-wrap">
+  <div class="summary-bar" id="summaryBar">Loading workflows from HubSpot…</div>
+  <div id="wfList"></div>
+</div>
+
+<script>
+  let WORKFLOWS = [];
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  async function loadWorkflows(refresh) {
+    document.getElementById('summaryBar').textContent = refresh
+      ? 'Refreshing from HubSpot…'
+      : 'Loading workflows from HubSpot… this can take a few seconds the first time.';
+    try {
+      const resp = await fetch('/api/hs-workflows' + (refresh ? '?refresh=1' : ''));
+      const data = await resp.json();
+      WORKFLOWS = data.workflows || [];
+      renderSummary(data);
+      renderList();
+    } catch (e) {
+      document.getElementById('summaryBar').textContent = 'Failed to load workflows — try refreshing.';
+    }
+  }
+
+  function renderSummary(data) {
+    const total = WORKFLOWS.length;
+    const enabled = WORKFLOWS.filter(w => w.enabled).length;
+    const withIssues = WORKFLOWS.filter(w => w.issue_count > 0).length;
+    const ts = data.generated_at ? new Date(data.generated_at).toLocaleString() : '';
+    document.getElementById('summaryBar').innerHTML = `
+      <span>${total} workflows &middot; ${enabled} active &middot;
+        <strong style="color:${withIssues ? '#b91c1c' : '#059669'}">${withIssues} with issues</strong>
+      </span>
+      <span class="summary-meta">Updated ${esc(ts)} <button class="btn-refresh" onclick="loadWorkflows(true)">Refresh</button></span>
+    `;
+  }
+
+  function renderList() {
+    const container = document.getElementById('wfList');
+    if (!WORKFLOWS.length) {
+      container.innerHTML = '<div class="empty-state">No workflows found.</div>';
+      return;
+    }
+    container.innerHTML = WORKFLOWS.map((w, i) => `
+      <div class="wf-card">
+        <div class="wf-card-head" onclick="toggleCard(${i})">
+          <div class="wf-name-row">
+            <span class="wf-name">${esc(w.name)}</span>
+            <span class="status-badge ${w.enabled ? 'connected' : 'default'}">${w.enabled ? 'Active' : 'Inactive'}</span>
+            ${w.object_type ? `<span class="wf-objtype">${esc(w.object_type)}-based</span>` : ''}
+          </div>
+          ${w.issue_count ? `<span class="status-badge error">&#9888; ${w.issue_count} issue${w.issue_count === 1 ? '' : 's'}</span>` : ''}
+        </div>
+        <div class="wf-card-body" id="wfbody-${i}" style="display:none">
+          <div class="wf-trigger"><strong>Trigger:</strong> ${esc(w.trigger)}</div>
+          ${w.issues && w.issues.length ? `<div class="issue-list">${w.issues.map(x => `<div class="issue-item">&#9888; ${esc(x)}</div>`).join('')}</div>` : ''}
+          <div class="wf-steps">${w.steps ? renderStep(w.steps) : '<div class="step-detail">No steps found.</div>'}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function toggleCard(i) {
+    const el = document.getElementById(`wfbody-${i}`);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function renderStep(step) {
+    if (!step) return '';
+    let html = `<div class="step-box">
+      <div class="step-label">${esc(step.label)}</div>
+      ${step.detail ? `<div class="step-detail">${esc(step.detail)}</div>` : ''}
+    </div>`;
+    if (step.branches) {
+      html += step.branches.map(b => `
+        <div class="branch-block">
+          <div class="branch-name">&#8618; ${esc(b.name)}</div>
+          ${b.condition ? `<div class="branch-condition">${esc(b.condition)}</div>` : ''}
+          ${b.step ? renderStep(b.step) : '<div class="step-detail" style="opacity:.6">(ends here)</div>'}
+        </div>
+      `).join('');
+    } else if (step.next) {
+      html += renderStep(step.next);
+    }
+    return html;
+  }
+
+  loadWorkflows(false);
+</script>
+</body>
+</html>
