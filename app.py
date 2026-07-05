@@ -324,12 +324,18 @@ QUICK_NOTES_HOST_MAP = {
 
 
 @app.route("/")
-@login_required
 def index():
     host = request.host.split(":")[0].lower()
     company = QUICK_NOTES_HOST_MAP.get(host)
     if company:
+        # This host is locked to one company's quick-notes page — redirect
+        # regardless of auth scope. A company-scoped login is valid here
+        # even though it isn't "admin", and quick_notes() below enforces
+        # its own login check for the unauthenticated case.
         return redirect(url_for("quick_notes", company=company))
+
+    if session.get("scope") != "admin":
+        return redirect(url_for("login", next=request.path))
 
     # Fetch rs_partner enum options
     client_options = []
