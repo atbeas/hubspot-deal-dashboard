@@ -819,6 +819,13 @@
       const deal = allDeals.find(d => d.id === dealId);
       if (deal) { deal.meeting_id = eventId; deal.meeting_label = meetingLabel; deal.meeting_calendar = eventCalendar; }
 
+      // Steps 5/6 were rendered disabled before Step 3 was confirmed — unlock
+      // them now instead of requiring a page reload to notice meeting_id is set.
+      const sendEmailBtn = document.getElementById(`sendemail-${dealId}`);
+      if (sendEmailBtn) { sendEmailBtn.disabled = false; sendEmailBtn.removeAttribute('title'); }
+      const handoffBtn = document.getElementById(`handoff-${dealId}`);
+      if (handoffBtn) { handoffBtn.disabled = false; handoffBtn.removeAttribute('title'); }
+
       closeModal();
       btn.textContent = '✓ Added';
       btn.classList.add('invited');
