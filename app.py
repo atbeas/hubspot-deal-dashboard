@@ -28,6 +28,11 @@ def init_db():
                 email3 TEXT DEFAULT ''
             )
         """)
+        for col in ("name1", "name2", "name3"):
+            try:
+                conn.execute(f"ALTER TABLE client_contacts ADD COLUMN {col} TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS owner_eligibility (
                 owner_id TEXT PRIMARY KEY,
@@ -110,7 +115,7 @@ CONNECTED_CALENDARS = [
 PREP_EMAIL_FROM  = "info@runwayselling.com"
 SEND_CONFIRM_BCC = "info@runwayselling.com"
 DEFAULT_EMAIL_TEMPLATE = (
-    "Hi there,\n\n"
+    "Hi [[client_name]],\n\n"
     "Thanks for taking the time to meet with us. Below are some notes to help "
     "you prepare for our upcoming conversation:\n"
 )
@@ -1229,6 +1234,9 @@ def settings():
         c["email1"] = saved.get("email1", "")
         c["email2"] = saved.get("email2", "")
         c["email3"] = saved.get("email3", "")
+        c["name1"]  = saved.get("name1", "")
+        c["name2"]  = saved.get("name2", "")
+        c["name3"]  = saved.get("name3", "")
         c["enabled"] = client_eligibility.get(c["value"], True)
 
     owners = fetch_hubspot_owners()
@@ -1263,15 +1271,19 @@ def settings():
 def save_client(client_value):
     body = request.get_json()
     emails = [body.get(f"email{i}", "").strip() for i in range(1, 4)]
+    names  = [body.get(f"name{i}", "").strip() for i in range(1, 4)]
     with get_db() as conn:
         conn.execute("""
-            INSERT INTO client_contacts (client_value, email1, email2, email3)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO client_contacts (client_value, email1, email2, email3, name1, name2, name3)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(client_value) DO UPDATE SET
                 email1 = excluded.email1,
                 email2 = excluded.email2,
-                email3 = excluded.email3
-        """, [client_value] + emails)
+                email3 = excluded.email3,
+                name1 = excluded.name1,
+                name2 = excluded.name2,
+                name3 = excluded.name3
+        """, [client_value] + emails + names)
     return jsonify({"ok": True})
 
 
@@ -1297,8 +1309,11 @@ def get_client(client_value):
             "SELECT * FROM client_contacts WHERE client_value = ?", [client_value]
         ).fetchone()
     if row:
-        return jsonify({"emails": [row["email1"], row["email2"], row["email3"]]})
-    return jsonify({"emails": ["", "", ""]})
+        return jsonify({
+            "emails": [row["email1"], row["email2"], row["email3"]],
+            "names":  [row["name1"], row["name2"], row["name3"]],
+        })
+    return jsonify({"emails": ["", "", ""], "names": ["", "", ""]})
 
 
 CAMERON_OWNER_ID = "93829264"

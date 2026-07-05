@@ -58,6 +58,8 @@
     .client-name { font-size: .88rem; font-weight: 600; color: #1a1a2e; }
     .client-row.hidden { display: none; }
 
+    .contact-cell { display: flex; flex-direction: column; gap: 4px; }
+
     input.email-input {
       width: 100%; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px;
       font-size: .84rem; font-family: inherit; color: #1a1a2e; outline: none;
@@ -66,6 +68,15 @@
     input.email-input:focus { border-color: #ff5c35; }
     input.email-input.dirty { border-color: #fcd34d; background: #fffbeb; }
     input.email-input.saved { border-color: #6ee7b7; background: #f0fdf4; }
+
+    input.name-input {
+      width: 100%; padding: 5px 9px; border: 1px solid #e5e7eb; border-radius: 6px;
+      font-size: .76rem; font-family: inherit; color: #6b7280; outline: none;
+      transition: border-color .2s;
+    }
+    input.name-input:focus { border-color: #ff5c35; color: #1a1a2e; }
+    input.name-input.dirty { border-color: #fcd34d; background: #fffbeb; }
+    input.name-input.saved { border-color: #6ee7b7; background: #f0fdf4; }
 
     .btn-save {
       padding: 7px 14px; border-radius: 6px; font-size: .82rem; font-weight: 600;
@@ -162,7 +173,7 @@
 <div class="page-wrap">
   <div class="page-header">
     <h2>Client Contact Emails</h2>
-    <p>Add up to 3 email addresses per client. These will be pre-filled in the "Add to Invite" confirmation when that client is assigned to a deal. Uncheck "Active" to hide a client from the Client dropdown when assigning deals — it stays visible on any deal it's already assigned to.</p>
+    <p>Add up to 3 contacts per client — name plus email. Names are used to address the Step 5 prep email to the right person (via the <code>[[client_name]]</code> placeholder in the Prep Email Template below). These are also pre-filled in the "Add to Invite" confirmation when that client is assigned to a deal. Uncheck "Active" to hide a client from the Client dropdown when assigning deals — it stays visible on any deal it's already assigned to.</p>
   </div>
 
   <div class="search-bar">
@@ -172,21 +183,33 @@
   <div class="client-table">
     <div class="client-row header-row">
       <div>Client</div>
-      <div>Contact Email 1</div>
-      <div>Contact Email 2</div>
-      <div>Contact Email 3</div>
+      <div>Contact 1</div>
+      <div>Contact 2</div>
+      <div>Contact 3</div>
       <div></div>
       <div class="col-check">Active</div>
     </div>
     {% for c in client_options %}
     <div class="client-row" data-label="{{ c.label | lower }}" id="row-{{ c.value }}">
       <div class="client-name">{{ c.label }}</div>
-      <input class="email-input" type="email" placeholder="email@example.com"
-             value="{{ c.email1 }}" oninput="markDirty(this, '{{ c.value }}')" />
-      <input class="email-input" type="email" placeholder="email@example.com"
-             value="{{ c.email2 }}" oninput="markDirty(this, '{{ c.value }}')" />
-      <input class="email-input" type="email" placeholder="email@example.com"
-             value="{{ c.email3 }}" oninput="markDirty(this, '{{ c.value }}')" />
+      <div class="contact-cell">
+        <input class="name-input" type="text" placeholder="Name"
+               value="{{ c.name1 }}" oninput="markDirty(this, '{{ c.value }}')" />
+        <input class="email-input" type="email" placeholder="email@example.com"
+               value="{{ c.email1 }}" oninput="markDirty(this, '{{ c.value }}')" />
+      </div>
+      <div class="contact-cell">
+        <input class="name-input" type="text" placeholder="Name"
+               value="{{ c.name2 }}" oninput="markDirty(this, '{{ c.value }}')" />
+        <input class="email-input" type="email" placeholder="email@example.com"
+               value="{{ c.email2 }}" oninput="markDirty(this, '{{ c.value }}')" />
+      </div>
+      <div class="contact-cell">
+        <input class="name-input" type="text" placeholder="Name"
+               value="{{ c.name3 }}" oninput="markDirty(this, '{{ c.value }}')" />
+        <input class="email-input" type="email" placeholder="email@example.com"
+               value="{{ c.email3 }}" oninput="markDirty(this, '{{ c.value }}')" />
+      </div>
       <button class="btn-save" id="savebtn-{{ c.value }}"
               onclick="saveClient('{{ c.value }}', this)">Save</button>
       <div class="col-check">
@@ -248,7 +271,7 @@
   </div>
 
   <div class="template-subhead">Prep Email Template</div>
-  <p style="font-size:.85rem; color:#6b7280; margin-bottom:10px;">This intro text is prepended to the Client-Facing Notes when sending the "Send Prep Email" from a deal card. Always sent from Runway Selling regardless of calendar. Only available once Step 3 (add the team to the meeting invite) is complete on a deal. Can still be edited per-email before sending.</p>
+  <p style="font-size:.85rem; color:#6b7280; margin-bottom:10px;">This intro text is prepended to the Client-Facing Notes when sending the "Send Prep Email" from a deal card. Always sent from Runway Selling regardless of calendar. Only available once Step 3 (add the team to the meeting invite) is complete on a deal. Can still be edited per-email before sending. Use <code>[[client_name]]</code> to greet the client contact(s) on file by name (falls back to "there" if no name is on file for that client).</p>
 
   <label class="subject-label" for="emailSubjectInput">Subject line — use <code>[[company]]</code> and <code>[[client]]</code> as placeholders</label>
   <input type="text" id="emailSubjectInput" class="email-subject-input"
@@ -294,9 +317,12 @@
 
   async function saveClient(clientValue, btn) {
     const row = document.getElementById(`row-${clientValue}`);
-    const inputs = row.querySelectorAll('input.email-input');
+    const emailInputs = row.querySelectorAll('input.email-input');
+    const nameInputs = row.querySelectorAll('input.name-input');
     const payload = {};
-    inputs.forEach((inp, i) => { payload[`email${i + 1}`] = inp.value.trim(); });
+    emailInputs.forEach((inp, i) => { payload[`email${i + 1}`] = inp.value.trim(); });
+    nameInputs.forEach((inp, i) => { payload[`name${i + 1}`] = inp.value.trim(); });
+    const inputs = [...emailInputs, ...nameInputs];
 
     btn.disabled = true;
     btn.textContent = 'Saving…';
