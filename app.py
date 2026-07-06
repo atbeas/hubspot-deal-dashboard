@@ -1335,6 +1335,45 @@ def get_client(client_value):
 
 OBJECT_TYPE_LABELS = {"0-1": "Contact", "0-2": "Company", "0-3": "Deal", "0-5": "Ticket"}
 
+# Short reference numbers Andrew uses when discussing these workflows day to
+# day — not a HubSpot concept, just this app's own naming so "WF1"/"WF4"/etc.
+# mean the same thing in conversation as they do here. Only the actively
+# maintained deal-creation workflows get one; everything else in the portal
+# (old drip campaigns, per-client outreach clones) is unlabeled.
+WF_REFERENCE = {
+    "616273312": {
+        "label": "WF1",
+        "description": "Main deal-creation router. Fires on any meeting booked via a HubSpot meetings link, "
+                        "then routes across 17 branches (one per known booking link) to set the right owner, "
+                        "deal stage, and brand, and sends internal email + Slack notifications.",
+    },
+    "1669757204": {
+        "label": "WF2",
+        "description": "New Lead > Create Deal. Broken — its trigger form was deleted at some point, so this "
+                        "workflow has never actually fired (0 enrollments).",
+    },
+    "1834480158": {
+        "label": "WF3",
+        "description": "Safety net for contacts who already have a deal and book a second meeting — notifies "
+                        "the team without creating a duplicate deal.",
+    },
+    "1835860399": {
+        "label": "WF4",
+        "description": "Roslyn Yee's dedicated workflow. Creates a Runway Selling deal when a contact books "
+                        "via either of her two meeting links (Call/Email or LinkedIn).",
+    },
+    "1835954567": {
+        "label": "WF5",
+        "description": "Cameron Whitmore's dedicated workflow. Creates a 10talent Tech deal (rs_partner = "
+                        "\"Pending Assignment\") when a contact books via his meeting link.",
+    },
+    "1846895500": {
+        "label": "WF6",
+        "description": "Patrick Leddy's dedicated workflow. Creates a Runway Selling deal when a contact "
+                        "books via his LinkedIn meeting link.",
+    },
+}
+
 # Custom behavioral event IDs seen in this portal's meeting-booking triggers
 # (see project_hubspot_workflows memory) — used only to make trigger text
 # readable and to flag the known WF4-style duplicate-enrollment bug pattern.
@@ -1525,10 +1564,14 @@ def _walk_flow(actions, start_id):
 
 
 def build_flow_summary(flow_entry, detail):
+    wf_ref = WF_REFERENCE.get(flow_entry["id"], {})
+
     if not detail:
         return {
             "id": flow_entry["id"],
             "name": flow_entry.get("name") or "(unnamed)",
+            "wf_label": wf_ref.get("label"),
+            "wf_description": wf_ref.get("description"),
             "enabled": flow_entry.get("isEnabled", False),
             "object_type": OBJECT_TYPE_LABELS.get(flow_entry.get("objectTypeId"), flow_entry.get("objectTypeId", "")),
             "updated_at": flow_entry.get("updatedAt", ""),
@@ -1553,6 +1596,8 @@ def build_flow_summary(flow_entry, detail):
     return {
         "id": flow_entry["id"],
         "name": flow_entry.get("name") or "(unnamed)",
+        "wf_label": wf_ref.get("label"),
+        "wf_description": wf_ref.get("description"),
         "enabled": flow_entry.get("isEnabled", False),
         "object_type": OBJECT_TYPE_LABELS.get(flow_entry.get("objectTypeId"), flow_entry.get("objectTypeId", "")),
         "updated_at": flow_entry.get("updatedAt", ""),
@@ -1583,7 +1628,12 @@ def api_hs_workflows():
         details = list(ex.map(lambda f: get_flow_detail(f["id"]), flows))
 
     summaries = [build_flow_summary(f, d) for f, d in zip(flows, details)]
-    summaries.sort(key=lambda s: (not s["enabled"], s["name"].lower()))
+
+    def sort_key(s):
+        wf_num = int(s["wf_label"][2:]) if s["wf_label"] else 999
+        return (wf_num, not s["enabled"], s["name"].lower())
+
+    summaries.sort(key=sort_key)
 
     payload = {"workflows": summaries, "generated_at": datetime.now(timezone.utc).isoformat()}
     _HS_WORKFLOWS_CACHE["data"] = payload
