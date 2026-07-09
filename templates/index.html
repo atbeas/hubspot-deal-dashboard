@@ -617,7 +617,7 @@
         quota: o.meeting_quota || 0,
         data: clientDealCounts[o.value] || { count: 0, no_show: 0, deals: [] },
       }))
-      .sort((a, b) => b.data.count - a.data.count || a.label.localeCompare(b.label));
+      .sort((a, b) => a.label.localeCompare(b.label));
 
     wrap.innerHTML = `
       <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">Deals created, last 30 days</span></div>
