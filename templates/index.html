@@ -71,6 +71,17 @@
     .client-sidebar-title { font-size: .8rem; font-weight: 700; color: #e8e9f0; }
     .client-sidebar-sub { font-size: .72rem; font-weight: 500; color: #8b8fa8; display: block; margin-top: 2px; }
     .client-sidebar-empty { font-size: .82rem; color: #8b8fa8; }
+    .client-sidebar-header-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; padding: 0 8px;
+    }
+    .client-sidebar-header-name { flex: 1; min-width: 0; }
+    .client-sidebar-header-label {
+      flex-shrink: 0; min-width: 22px; padding: 2px 7px; text-align: center;
+      font-size: .62rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .3px; color: #5c607a;
+    }
+    .client-sidebar-header-chevron { flex-shrink: 0; width: 10px; }
     .client-sidebar-list { display: flex; flex-direction: column; gap: 2px; max-height: 70vh; overflow-y: auto; }
     .client-side-row {
       display: flex; align-items: center; justify-content: space-between;
@@ -606,6 +617,13 @@
 
     wrap.innerHTML = `
       <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">Deals created, last 30 days</span></div>
+      <div class="client-sidebar-header-row">
+        <span class="client-sidebar-header-name"></span>
+        <span class="client-sidebar-header-label">Quota</span>
+        <span class="client-sidebar-header-label">Set</span>
+        <span class="client-sidebar-header-label">NS</span>
+        <span class="client-sidebar-header-chevron"></span>
+      </div>
       <div class="client-sidebar-list">
         ${rows.map(r => `
           <div class="client-side-row" data-client="${esc(r.value)}">
