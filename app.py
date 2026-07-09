@@ -677,6 +677,52 @@ def get_deals():
     return jsonify({"deals": deals, "total": len(deals)})
 
 
+@app.route("/api/client-deal-counts")
+@login_required
+def get_client_deal_counts():
+    # Powers the dashboard's client sidebar — how many deals landed for each
+    # client in the last 30 days, and which ones, so hovering a name shows
+    # the actual deal names without a separate lookup per client.
+    since_ms = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp() * 1000)
+
+    filters = [
+        {"propertyName": "createdate", "operator": "GTE", "value": str(since_ms)},
+        {"propertyName": "pipeline",   "operator": "IN",  "values": DASHBOARD_PIPELINES},
+    ]
+
+    clients = {}
+    after = None
+    while True:
+        payload = {
+            "filterGroups": [{"filters": filters}],
+            "properties": ["dealname", ROLE_PROPS["client"]],
+            "sorts": [{"propertyName": "createdate", "direction": "DESCENDING"}],
+            "limit": 100,
+        }
+        if after:
+            payload["after"] = after
+
+        resp = requests.post(f"{BASE_URL}/crm/v3/objects/deals/search", headers=HEADERS, json=payload)
+        if not resp.ok:
+            return jsonify({"error": resp.text}), resp.status_code
+
+        data = resp.json()
+        for result in data.get("results", []):
+            props = result.get("properties", {})
+            client_value = props.get(ROLE_PROPS["client"]) or ""
+            if not client_value:
+                continue
+            entry = clients.setdefault(client_value, {"count": 0, "deals": []})
+            entry["count"] += 1
+            entry["deals"].append({"id": result["id"], "name": props.get("dealname") or "(No name)"})
+
+        after = data.get("paging", {}).get("next", {}).get("after")
+        if not after:
+            break
+
+    return jsonify({"clients": clients})
+
+
 @app.route("/api/deals/<deal_id>", methods=["PATCH"])
 @any_login_required
 def update_deal(deal_id):

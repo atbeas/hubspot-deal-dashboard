@@ -59,7 +59,47 @@
     .stat .lbl { font-size: .75rem; color: #8b8fa8; margin-top: 1px; font-weight: 500; }
 
     /* ── Deal cards ── */
-    .cards { padding: 0 32px 40px; display: flex; flex-direction: column; gap: 10px; }
+    .dashboard-layout { display: flex; align-items: flex-start; gap: 22px; padding: 0 32px 40px; }
+    .cards { flex: 1; min-width: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+
+    /* ── Client sidebar (right rail) ── */
+    .client-sidebar {
+      width: 260px; flex-shrink: 0; position: sticky; top: 16px;
+      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 10px;
+      padding: 16px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .client-sidebar-title { font-size: .8rem; font-weight: 700; color: #e8e9f0; }
+    .client-sidebar-sub { font-size: .72rem; font-weight: 500; color: #8b8fa8; display: block; margin-top: 2px; }
+    .client-sidebar-empty { font-size: .82rem; color: #8b8fa8; }
+    .client-sidebar-list { display: flex; flex-direction: column; gap: 2px; max-height: 70vh; overflow-y: auto; }
+    .client-side-row {
+      position: relative; display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; padding: 7px 8px; border-radius: 6px; cursor: default;
+      transition: background .12s;
+    }
+    .client-side-row:hover { background: rgba(255,255,255,.05); }
+    .client-side-name { font-size: .83rem; color: #c9cad8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .client-side-count {
+      flex-shrink: 0; min-width: 22px; text-align: center; padding: 2px 7px; border-radius: 20px;
+      font-size: .74rem; font-weight: 700; background: rgba(34,197,94,.18); color: #4ade80;
+    }
+    .client-side-count.zero { background: rgba(255,255,255,.06); color: #5c607a; }
+
+    /* Positioned via JS (fixed, not absolute) so it can escape the sidebar's
+       own scroll container — an absolutely-positioned tooltip nested inside
+       an overflow:auto list gets clipped by that ancestor no matter what. */
+    #clientTooltip {
+      display: none; position: fixed; z-index: 500;
+      min-width: 200px; max-width: 300px; max-height: 240px; overflow-y: auto;
+      background: #252839; border: 1px solid #3a3d50; border-radius: 8px;
+      padding: 10px 12px; box-shadow: 0 8px 28px rgba(0,0,0,.5);
+    }
+    #clientTooltip.show { display: block; }
+    .tooltip-deal {
+      font-size: .8rem; color: #e8e9f0; padding: 4px 0;
+      border-bottom: 1px solid #2a2d3e;
+    }
+    .tooltip-deal:last-child { border-bottom: none; }
 
     .card {
       background: #1e2030; border: 1px solid #2a2d3e; border-radius: 10px;
@@ -355,9 +395,18 @@
   <div class="stat"><div class="val" id="sComplete">0</div><div class="lbl">Fully Assigned</div></div>
 </div>
 
-<div class="cards" id="cardsWrap">
-  <div class="state-box">Select a date range and click Search</div>
+<div class="dashboard-layout">
+  <div class="cards" id="cardsWrap">
+    <div class="state-box">Select a date range and click Search</div>
+  </div>
+
+  <aside class="client-sidebar" id="clientSidebar">
+    <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">Deals created, last 30 days</span></div>
+    <div class="client-sidebar-empty">Loading…</div>
+  </aside>
 </div>
+
+<div id="clientTooltip"></div>
 
 <div id="toast"></div>
 
@@ -470,6 +519,7 @@
   let otherBucketDeals = []; // opposite archived/active bucket, same date range — conflict-check lookup only
   let showArchived = false;
   let allMeetings = [];
+  let clientDealCounts = {}; // rs_partner value -> { count, deals: [{id, name}] }, last 30 days
 
   // Client options come from the server (rs_partner enum), alphabetized for easier scanning
   const CLIENT_OPTIONS = ({{ client_options | tojson }}).sort((a, b) => a.label.localeCompare(b.label));
@@ -514,6 +564,78 @@
     } catch(e) {
       console.warn('Could not load meetings:', e);
     }
+  }
+
+  async function loadClientDealCounts() {
+    try {
+      const r = await fetch('/api/client-deal-counts');
+      const d = await r.json();
+      clientDealCounts = d.clients || {};
+    } catch(e) {
+      console.warn('Could not load client deal counts:', e);
+    }
+    renderClientSidebar();
+  }
+
+  function renderClientSidebar() {
+    const wrap = document.getElementById('clientSidebar');
+    const enabledClients = CLIENT_OPTIONS.filter(o => o.enabled !== false);
+
+    if (!enabledClients.length) {
+      wrap.innerHTML = `
+        <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">Deals created, last 30 days</span></div>
+        <div class="client-sidebar-empty">No active clients</div>
+      `;
+      return;
+    }
+
+    const rows = enabledClients
+      .map(o => ({ label: o.label, value: o.value, data: clientDealCounts[o.value] || { count: 0, deals: [] } }))
+      .sort((a, b) => b.data.count - a.data.count || a.label.localeCompare(b.label));
+
+    wrap.innerHTML = `
+      <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">Deals created, last 30 days</span></div>
+      <div class="client-sidebar-list">
+        ${rows.map(r => `
+          <div class="client-side-row" data-client="${esc(r.value)}">
+            <span class="client-side-name">${esc(r.label)}</span>
+            <span class="client-side-count${r.data.count ? '' : ' zero'}">${r.data.count}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    wrap.querySelectorAll('.client-side-row').forEach(row => {
+      row.addEventListener('mouseenter', () => showClientTooltip(row));
+      row.addEventListener('mouseleave', hideClientTooltip);
+    });
+  }
+
+  function showClientTooltip(row) {
+    const data = clientDealCounts[row.dataset.client];
+    const tooltip = document.getElementById('clientTooltip');
+    if (!data || !data.deals.length) {
+      tooltip.classList.remove('show');
+      return;
+    }
+    tooltip.innerHTML = data.deals.map(d => `<div class="tooltip-deal">${esc(d.name)}</div>`).join('');
+    tooltip.classList.add('show');
+
+    const rect = row.getBoundingClientRect();
+    const tw = tooltip.offsetWidth;
+    const th = tooltip.offsetHeight;
+    // Prefer opening to the left of the sidebar; flip to the right if the
+    // viewport's too narrow, and clamp vertically so it never runs offscreen.
+    let left = rect.left - tw - 10;
+    if (left < 8) left = rect.right + 10;
+    let top = Math.min(rect.top, window.innerHeight - th - 8);
+    top = Math.max(8, top);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+
+  function hideClientTooltip() {
+    document.getElementById('clientTooltip').classList.remove('show');
   }
 
   function toggleMeetingDropdown(dealId) {
@@ -1577,9 +1699,10 @@
     el.addEventListener('keydown', e => e.key === 'Enter' && loadDeals())
   );
 
-  // Pre-load owners and meetings in background
+  // Pre-load owners, meetings, and client deal counts in background
   loadOwners();
   loadMeetings();
+  loadClientDealCounts();
 </script>
 </body>
 </html>
