@@ -73,12 +73,13 @@
     .client-sidebar-empty { font-size: .82rem; color: #8b8fa8; }
     .client-sidebar-list { display: flex; flex-direction: column; gap: 2px; max-height: 70vh; overflow-y: auto; }
     .client-side-row {
-      position: relative; display: flex; align-items: center; justify-content: space-between;
-      gap: 10px; padding: 7px 8px; border-radius: 6px; cursor: default;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer;
       transition: background .12s;
     }
     .client-side-row:hover { background: rgba(255,255,255,.05); }
-    .client-side-name { font-size: .83rem; color: #c9cad8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .client-side-row.expanded { background: rgba(255,255,255,.06); }
+    .client-side-name { font-size: .83rem; color: #c9cad8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
     .client-side-count {
       flex-shrink: 0; min-width: 22px; text-align: center; padding: 2px 7px; border-radius: 20px;
       font-size: .74rem; font-weight: 700; background: rgba(34,197,94,.18); color: #4ade80;
@@ -88,24 +89,20 @@
       flex-shrink: 0; min-width: 22px; text-align: center; padding: 2px 7px; border-radius: 20px;
       font-size: .74rem; font-weight: 700; background: rgba(220,38,38,.18); color: #f87171;
     }
+    .client-side-chevron {
+      flex-shrink: 0; font-size: .65rem; color: #5c607a; transition: transform .15s;
+    }
+    .client-side-row.expanded .client-side-chevron { transform: rotate(90deg); }
 
-    /* Positioned via JS (fixed, not absolute) so it can escape the sidebar's
-       own scroll container — an absolutely-positioned tooltip nested inside
-       an overflow:auto list gets clipped by that ancestor no matter what. */
-    #clientTooltip {
-      display: none; position: fixed; z-index: 500;
-      min-width: 200px; max-width: 300px; max-height: 240px; overflow-y: auto;
-      background: #252839; border: 1px solid #3a3d50; border-radius: 8px;
-      padding: 10px 12px; box-shadow: 0 8px 28px rgba(0,0,0,.5);
+    .client-side-detail {
+      display: none; padding: 2px 8px 10px; margin-bottom: 2px;
     }
-    #clientTooltip.show { display: block; }
-    .tooltip-deal {
-      padding: 6px 0;
-      border-bottom: 1px solid #2a2d3e;
-    }
-    .tooltip-deal:last-child { border-bottom: none; }
-    .tooltip-deal-name { font-size: .8rem; color: #e8e9f0; }
-    .tooltip-deal-meta { font-size: .72rem; color: #8b8fa8; margin-top: 2px; }
+    .client-side-detail.open { display: block; }
+    .client-side-detail-empty { font-size: .78rem; color: #8b8fa8; padding: 6px 0; }
+    .detail-deal { padding: 6px 0; border-bottom: 1px solid #2a2d3e; }
+    .detail-deal:last-child { border-bottom: none; }
+    .detail-deal-name { font-size: .8rem; color: #e8e9f0; }
+    .detail-deal-meta { font-size: .72rem; color: #8b8fa8; margin-top: 2px; }
 
     .card {
       background: #1e2030; border: 1px solid #2a2d3e; border-radius: 10px;
@@ -412,8 +409,6 @@
   </div>
 </div>
 
-<div id="clientTooltip"></div>
-
 <div id="toast"></div>
 
 <!-- Invite confirmation modal -->
@@ -607,47 +602,29 @@
             <span class="client-side-name">${esc(r.label)}</span>
             <span class="client-side-count${r.data.count ? '' : ' zero'}">${r.data.count}</span>
             <span class="client-side-count-noshow" title="No-show / declined / canceled (Reschedule Meeting 1)">${r.data.no_show}</span>
+            <span class="client-side-chevron">▸</span>
+          </div>
+          <div class="client-side-detail" id="clientdetail-${esc(r.value)}">
+            ${r.data.deals.length ? r.data.deals.map(d => `
+              <div class="detail-deal">
+                <div class="detail-deal-name">${esc(d.name)}</div>
+                <div class="detail-deal-meta">Created ${esc(d.created)} · ${esc(d.stage)}</div>
+              </div>
+            `).join('') : '<div class="client-side-detail-empty">No deals in this window</div>'}
           </div>
         `).join('')}
       </div>
     `;
 
     wrap.querySelectorAll('.client-side-row').forEach(row => {
-      row.addEventListener('mouseenter', () => showClientTooltip(row));
-      row.addEventListener('mouseleave', hideClientTooltip);
+      row.addEventListener('click', () => toggleClientDetail(row));
     });
   }
 
-  function showClientTooltip(row) {
-    const data = clientDealCounts[row.dataset.client];
-    const tooltip = document.getElementById('clientTooltip');
-    if (!data || !data.deals.length) {
-      tooltip.classList.remove('show');
-      return;
-    }
-    tooltip.innerHTML = data.deals.map(d => `
-      <div class="tooltip-deal">
-        <div class="tooltip-deal-name">${esc(d.name)}</div>
-        <div class="tooltip-deal-meta">Created ${esc(d.created)} · ${esc(d.stage)}</div>
-      </div>
-    `).join('');
-    tooltip.classList.add('show');
-
-    const rect = row.getBoundingClientRect();
-    const tw = tooltip.offsetWidth;
-    const th = tooltip.offsetHeight;
-    // Prefer opening to the right of the sidebar; flip to the left if the
-    // viewport's too narrow, and clamp vertically so it never runs offscreen.
-    let left = rect.right + 10;
-    if (left + tw > window.innerWidth - 8) left = rect.left - tw - 10;
-    let top = Math.min(rect.top, window.innerHeight - th - 8);
-    top = Math.max(8, top);
-    tooltip.style.left = `${left}px`;
-    tooltip.style.top = `${top}px`;
-  }
-
-  function hideClientTooltip() {
-    document.getElementById('clientTooltip').classList.remove('show');
+  function toggleClientDetail(row) {
+    const detail = document.getElementById(`clientdetail-${row.dataset.client}`);
+    const isOpen = detail.classList.toggle('open');
+    row.classList.toggle('expanded', isOpen);
   }
 
   function toggleMeetingDropdown(dealId) {
