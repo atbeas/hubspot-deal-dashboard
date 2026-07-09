@@ -64,7 +64,7 @@
 
     /* ── Client sidebar (left rail) ── */
     .client-sidebar {
-      width: 260px; flex-shrink: 0; position: sticky; top: 16px;
+      width: 300px; flex-shrink: 0; position: sticky; top: 16px;
       background: #1e2030; border: 1px solid #2a2d3e; border-radius: 10px;
       padding: 16px; display: flex; flex-direction: column; gap: 10px;
     }
@@ -80,6 +80,11 @@
     .client-side-row:hover { background: rgba(255,255,255,.05); }
     .client-side-row.expanded { background: rgba(255,255,255,.06); }
     .client-side-name { font-size: .83rem; color: #c9cad8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+    .client-side-quota {
+      flex-shrink: 0; min-width: 22px; text-align: center; padding: 2px 7px; border-radius: 20px;
+      font-size: .74rem; font-weight: 700; background: rgba(37,99,235,.18); color: #60a5fa;
+    }
+    .client-side-quota.unset { background: rgba(255,255,255,.06); color: #5c607a; }
     .client-side-count {
       flex-shrink: 0; min-width: 22px; text-align: center; padding: 2px 7px; border-radius: 20px;
       font-size: .74rem; font-weight: 700; background: rgba(34,197,94,.18); color: #4ade80;
@@ -591,7 +596,12 @@
     }
 
     const rows = enabledClients
-      .map(o => ({ label: o.label, value: o.value, data: clientDealCounts[o.value] || { count: 0, no_show: 0, deals: [] } }))
+      .map(o => ({
+        label: o.label,
+        value: o.value,
+        quota: o.meeting_quota || 0,
+        data: clientDealCounts[o.value] || { count: 0, no_show: 0, deals: [] },
+      }))
       .sort((a, b) => b.data.count - a.data.count || a.label.localeCompare(b.label));
 
     wrap.innerHTML = `
@@ -600,6 +610,7 @@
         ${rows.map(r => `
           <div class="client-side-row" data-client="${esc(r.value)}">
             <span class="client-side-name">${esc(r.label)}</span>
+            <span class="client-side-quota${r.quota ? '' : ' unset'}" title="Meeting quota">${r.quota || '–'}</span>
             <span class="client-side-count${r.data.count ? '' : ' zero'}">${r.data.count}</span>
             <span class="client-side-count-noshow" title="No-show / declined / canceled (Reschedule Meeting 1)">${r.data.no_show}</span>
             <span class="client-side-chevron">▸</span>

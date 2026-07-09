@@ -44,7 +44,7 @@
     }
     .client-row {
       display: grid;
-      grid-template-columns: 200px 1fr 1fr 1fr 90px 70px;
+      grid-template-columns: 200px 80px 1fr 1fr 1fr 90px 70px;
       gap: 12px; align-items: center;
       padding: 12px 20px; border-bottom: 1px solid #f0f0f0;
     }
@@ -77,6 +77,15 @@
     input.name-input:focus { border-color: #ff5c35; color: #1a1a2e; }
     input.name-input.dirty { border-color: #fcd34d; background: #fffbeb; }
     input.name-input.saved { border-color: #6ee7b7; background: #f0fdf4; }
+
+    input.quota-input {
+      width: 100%; padding: 7px 8px; border: 1px solid #d1d5db; border-radius: 6px;
+      font-size: .84rem; font-family: inherit; color: #1a1a2e; outline: none;
+      text-align: center; transition: border-color .2s;
+    }
+    input.quota-input:focus { border-color: #ff5c35; }
+    input.quota-input.dirty { border-color: #fcd34d; background: #fffbeb; }
+    input.quota-input.saved { border-color: #6ee7b7; background: #f0fdf4; }
 
     .btn-save {
       padding: 7px 14px; border-radius: 6px; font-size: .82rem; font-weight: 600;
@@ -174,7 +183,7 @@
 <div class="page-wrap">
   <div class="page-header">
     <h2>Client Contact Emails</h2>
-    <p>Add up to 3 contacts per client — name plus email. Names are used to address the Step 5 prep email to the right person (via the <code>[[client_name]]</code> placeholder in the Prep Email Template below). These are also pre-filled in the "Add to Invite" confirmation when that client is assigned to a deal. Uncheck "Active" to hide a client from the Client dropdown when assigning deals — it stays visible on any deal it's already assigned to.</p>
+    <p>Add up to 3 contacts per client — name plus email. Names are used to address the Step 5 prep email to the right person (via the <code>[[client_name]]</code> placeholder in the Prep Email Template below). These are also pre-filled in the "Add to Invite" confirmation when that client is assigned to a deal. Uncheck "Active" to hide a client from the Client dropdown when assigning deals — it stays visible on any deal it's already assigned to. "Quota" is the target number of meetings for that client — shown as a blue reference number next to their deal count on the main dashboard's Clients sidebar.</p>
   </div>
 
   <div class="search-bar">
@@ -184,6 +193,7 @@
   <div class="client-table">
     <div class="client-row header-row">
       <div>Client</div>
+      <div>Quota</div>
       <div>Contact 1</div>
       <div>Contact 2</div>
       <div>Contact 3</div>
@@ -193,6 +203,10 @@
     {% for c in client_options %}
     <div class="client-row" data-label="{{ c.label | lower }}" id="row-{{ c.value }}">
       <div class="client-name">{{ c.label }}</div>
+      <div>
+        <input class="quota-input" type="number" min="0" placeholder="0"
+               value="{{ c.meeting_quota }}" oninput="markDirty(this, '{{ c.value }}')" />
+      </div>
       <div class="contact-cell">
         <input class="name-input" type="text" placeholder="Name"
                value="{{ c.name1 }}" oninput="markDirty(this, '{{ c.value }}')" />
@@ -320,10 +334,12 @@
     const row = document.getElementById(`row-${clientValue}`);
     const emailInputs = row.querySelectorAll('input.email-input');
     const nameInputs = row.querySelectorAll('input.name-input');
+    const quotaInput = row.querySelector('input.quota-input');
     const payload = {};
     emailInputs.forEach((inp, i) => { payload[`email${i + 1}`] = inp.value.trim(); });
     nameInputs.forEach((inp, i) => { payload[`name${i + 1}`] = inp.value.trim(); });
-    const inputs = [...emailInputs, ...nameInputs];
+    payload.meeting_quota = quotaInput.value.trim();
+    const inputs = [...emailInputs, ...nameInputs, quotaInput];
 
     btn.disabled = true;
     btn.textContent = 'Saving…';
