@@ -683,14 +683,41 @@ def get_deals():
 # only matches this stage, by design.
 NO_SHOW_STAGE_ID = "1072720995"
 
+_STAGE_LABEL_CACHE = {"data": None, "ts": 0}
+STAGE_LABEL_CACHE_TTL = 600  # seconds
+
+
+def get_deal_stage_labels():
+    # stage IDs are unique within a pipeline, and the dashboard's two
+    # pipelines don't share any IDs, so a flat id -> label map is safe here.
+    # Cached briefly since this is fetched on every dashboard page load.
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _STAGE_LABEL_CACHE["data"]
+    if cached and (now_ts - _STAGE_LABEL_CACHE["ts"] < STAGE_LABEL_CACHE_TTL):
+        return cached
+
+    labels = {}
+    for pipeline_id in DASHBOARD_PIPELINES:
+        resp = requests.get(f"{BASE_URL}/crm/v3/pipelines/deals/{pipeline_id}", headers=HEADERS)
+        if not resp.ok:
+            continue
+        for stage in resp.json().get("stages", []):
+            labels[stage["id"]] = stage.get("label", stage["id"])
+
+    _STAGE_LABEL_CACHE["data"] = labels
+    _STAGE_LABEL_CACHE["ts"] = now_ts
+    return labels
+
 
 @app.route("/api/client-deal-counts")
 @login_required
 def get_client_deal_counts():
     # Powers the dashboard's client sidebar — how many deals landed for each
     # client in the last 30 days, and which ones, so hovering a name shows
-    # the actual deal names without a separate lookup per client.
+    # the actual deal names (plus created date + current stage) without a
+    # separate lookup per client.
     since_ms = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp() * 1000)
+    stage_labels = get_deal_stage_labels()
 
     filters = [
         {"propertyName": "createdate", "operator": "GTE", "value": str(since_ms)},
@@ -702,7 +729,7 @@ def get_client_deal_counts():
     while True:
         payload = {
             "filterGroups": [{"filters": filters}],
-            "properties": ["dealname", "dealstage", ROLE_PROPS["client"]],
+            "properties": ["dealname", "dealstage", "createdate", ROLE_PROPS["client"]],
             "sorts": [{"propertyName": "createdate", "direction": "DESCENDING"}],
             "limit": 100,
         }
@@ -719,11 +746,24 @@ def get_client_deal_counts():
             client_value = props.get(ROLE_PROPS["client"]) or ""
             if not client_value:
                 continue
+
+            stage_id = props.get("dealstage") or ""
+            create_ts = props.get("createdate", "")
+            try:
+                created = datetime.fromisoformat(create_ts.replace("Z", "+00:00")).strftime("%b %d, %Y")
+            except Exception:
+                created = create_ts
+
             entry = clients.setdefault(client_value, {"count": 0, "no_show": 0, "deals": []})
             entry["count"] += 1
-            if props.get("dealstage") == NO_SHOW_STAGE_ID:
+            if stage_id == NO_SHOW_STAGE_ID:
                 entry["no_show"] += 1
-            entry["deals"].append({"id": result["id"], "name": props.get("dealname") or "(No name)"})
+            entry["deals"].append({
+                "id": result["id"],
+                "name": props.get("dealname") or "(No name)",
+                "created": created,
+                "stage": stage_labels.get(stage_id, stage_id or "—"),
+            })
 
         after = data.get("paging", {}).get("next", {}).get("after")
         if not after:

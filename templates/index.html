@@ -100,10 +100,12 @@
     }
     #clientTooltip.show { display: block; }
     .tooltip-deal {
-      font-size: .8rem; color: #e8e9f0; padding: 4px 0;
+      padding: 6px 0;
       border-bottom: 1px solid #2a2d3e;
     }
     .tooltip-deal:last-child { border-bottom: none; }
+    .tooltip-deal-name { font-size: .8rem; color: #e8e9f0; }
+    .tooltip-deal-meta { font-size: .72rem; color: #8b8fa8; margin-top: 2px; }
 
     .card {
       background: #1e2030; border: 1px solid #2a2d3e; border-radius: 10px;
@@ -623,7 +625,12 @@
       tooltip.classList.remove('show');
       return;
     }
-    tooltip.innerHTML = data.deals.map(d => `<div class="tooltip-deal">${esc(d.name)}</div>`).join('');
+    tooltip.innerHTML = data.deals.map(d => `
+      <div class="tooltip-deal">
+        <div class="tooltip-deal-name">${esc(d.name)}</div>
+        <div class="tooltip-deal-meta">Created ${esc(d.created)} · ${esc(d.stage)}</div>
+      </div>
+    `).join('');
     tooltip.classList.add('show');
 
     const rect = row.getBoundingClientRect();
