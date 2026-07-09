@@ -677,6 +677,13 @@ def get_deals():
     return jsonify({"deals": deals, "total": len(deals)})
 
 
+# "Reschedule Meeting 1 (No Show, Declined, Canceled)" stage ID in the
+# "1 SD New Deal Pipeline" (DASHBOARD_PIPELINES[0], "default") — the only
+# pipeline that has this exact stage. The client sidebar's no-show count
+# only matches this stage, by design.
+NO_SHOW_STAGE_ID = "1072720995"
+
+
 @app.route("/api/client-deal-counts")
 @login_required
 def get_client_deal_counts():
@@ -695,7 +702,7 @@ def get_client_deal_counts():
     while True:
         payload = {
             "filterGroups": [{"filters": filters}],
-            "properties": ["dealname", ROLE_PROPS["client"]],
+            "properties": ["dealname", "dealstage", ROLE_PROPS["client"]],
             "sorts": [{"propertyName": "createdate", "direction": "DESCENDING"}],
             "limit": 100,
         }
@@ -712,8 +719,10 @@ def get_client_deal_counts():
             client_value = props.get(ROLE_PROPS["client"]) or ""
             if not client_value:
                 continue
-            entry = clients.setdefault(client_value, {"count": 0, "deals": []})
+            entry = clients.setdefault(client_value, {"count": 0, "no_show": 0, "deals": []})
             entry["count"] += 1
+            if props.get("dealstage") == NO_SHOW_STAGE_ID:
+                entry["no_show"] += 1
             entry["deals"].append({"id": result["id"], "name": props.get("dealname") or "(No name)"})
 
         after = data.get("paging", {}).get("next", {}).get("after")
