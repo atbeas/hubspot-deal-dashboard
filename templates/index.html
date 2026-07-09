@@ -72,15 +72,19 @@
     .client-sidebar-sub { font-size: .72rem; font-weight: 500; color: #8b8fa8; display: block; margin-top: 2px; }
     .client-sidebar-empty { font-size: .82rem; color: #8b8fa8; }
     .client-sidebar-header-row {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 8px; padding: 0 8px;
+      display: flex; align-items: flex-end; justify-content: space-between;
+      gap: 8px; padding: 0 8px; height: 30px; margin-top: 4px;
     }
     .client-sidebar-header-name { flex: 1; min-width: 0; }
+    .client-sidebar-header-slot { flex-shrink: 0; min-width: 22px; height: 100%; position: relative; }
     .client-sidebar-header-label {
-      flex-shrink: 0; min-width: 22px; padding: 2px 7px; text-align: center;
-      font-size: .62rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .3px; color: #5c607a;
+      position: absolute; left: 4px; bottom: 4px; transform-origin: bottom left;
+      transform: rotate(-40deg); white-space: nowrap;
+      font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
     }
+    .client-sidebar-header-label.quota { color: #60a5fa; }
+    .client-sidebar-header-label.set   { color: #4ade80; }
+    .client-sidebar-header-label.ns    { color: #f87171; }
     .client-sidebar-header-chevron { flex-shrink: 0; width: 10px; }
     .client-sidebar-list { display: flex; flex-direction: column; gap: 2px; max-height: 70vh; overflow-y: auto; }
     .client-side-row {
@@ -619,9 +623,9 @@
       <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">Deals created, last 30 days</span></div>
       <div class="client-sidebar-header-row">
         <span class="client-sidebar-header-name"></span>
-        <span class="client-sidebar-header-label">Quota</span>
-        <span class="client-sidebar-header-label">Set</span>
-        <span class="client-sidebar-header-label">NS</span>
+        <span class="client-sidebar-header-slot"><span class="client-sidebar-header-label quota">Quota</span></span>
+        <span class="client-sidebar-header-slot"><span class="client-sidebar-header-label set">Set</span></span>
+        <span class="client-sidebar-header-slot"><span class="client-sidebar-header-label ns">NS</span></span>
         <span class="client-sidebar-header-chevron"></span>
       </div>
       <div class="client-sidebar-list">
