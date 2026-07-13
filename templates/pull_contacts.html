@@ -214,7 +214,7 @@
         <div class="summary-chip"><b id="totalKept">0</b> kept</div>
       </div>
       <div class="hint" style="margin-bottom:10px">
-        <strong>Rule:</strong> a lead already pulled or pushed within the last 6 months starts unchecked here (see the "Seen before?" column for when) so we don't work the same person twice. You can still manually re-check one if you want to include it anyway.
+        <strong>Rule:</strong> a lead already pulled or pushed within the last 6 months starts unchecked here (see the "Seen before?" column — "Old" means already Apollo-enriched and confirmed in HubSpot) so we don't work the same person twice. You can still manually re-check one if you want to include it anyway.
       </div>
       <div class="hint" id="scrubTruncatedNote" style="display:none;color:#fbbf24;margin-bottom:10px">
         This search matched more than 1000 people in Apollo — showing the first 1000. Narrow the criteria (titles, keyword, employee range) to capture the rest.
@@ -499,14 +499,12 @@ function hubspotStatusCell(c) {
 }
 
 function seenBeforeCell(c) {
-  if (!c.prior_pull) return '<span class="pill pill-good">new</span>';
-  const when = formatTimestamp(c.prior_pull.created_at);
-  const withinWindow = c.auto_excluded_recent;
-  const suffix = withinWindow ? ' — within 6mo' : '';
-  if (c.prior_pull.pushed_at) {
-    return `<span class="pill pill-bad" title="Batch: ${esc(c.prior_pull.search_name)}">Pushed ${formatTimestamp(c.prior_pull.pushed_at)}${suffix}</span>`;
+  const isOld = c.enrich_status === 'done' && c.hubspot_status === 'found';
+  const title = c.prior_pull ? `Batch: ${esc(c.prior_pull.search_name)}` : '';
+  if (isOld) {
+    return `<span class="pill pill-good"${title ? ` title="${title}"` : ''}>Old</span>`;
   }
-  return `<span class="pill pill-warn" title="Batch: ${esc(c.prior_pull.search_name)}">Seen ${when}, not pushed${suffix}</span>`;
+  return `<span class="pill pill-bad"${title ? ` title="${title}"` : ''}>New</span>`;
 }
 
 function renderScrubTable() {
