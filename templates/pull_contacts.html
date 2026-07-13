@@ -43,6 +43,9 @@
     }
     .rail-item:hover { background: rgba(255,255,255,.06); }
     .rail-item.active { background: #ff5c35; color: #fff; font-weight: 600; }
+    .rail-item.pushed { border-left: 3px solid #60a5fa; padding-left: 7px; }
+    .rail-item.pushed .rail-item-main span:first-child { color: #7c8fd6; }
+    .rail-item.pushed.active .rail-item-main span:first-child { color: #fff; }
     .rail-item .del-x {
       opacity: 0; font-size: .75rem; color: #f87171; padding: 2px 4px; border-radius: 4px;
     }
@@ -386,7 +389,7 @@ async function loadPastBatches() {
   const data = await resp.json();
   const list = document.getElementById('pastPullsList');
   list.innerHTML = data.batches.map(b => `
-    <div class="rail-item" data-batch-id="${b.id}" onclick="resumeBatch(${b.id})">
+    <div class="rail-item${b.stage === 'pushed' ? ' pushed' : ''}" data-batch-id="${b.id}" onclick="resumeBatch(${b.id})">
       <div class="rail-item-main">
         <span>${esc(b.search_name)}</span>
         <span class="rail-sub">${stageLabel(b.stage)} · ${b.kept} kept${b.pushed ? ` · ${b.pushed} pushed` : ''}</span>
