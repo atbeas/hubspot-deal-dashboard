@@ -253,6 +253,10 @@
           <select id="fLeadSource"></select>
         </div>
         <div class="field">
+          <label>Custom Industry</label>
+          <select id="fCustomIndustry"></select>
+        </div>
+        <div class="field">
           <label>Contact Owner</label>
           <select id="fOwner"></select>
         </div>
@@ -548,6 +552,9 @@ async function loadHubspotOptions() {
   focusSel.innerHTML = sortByLabel(data.sales_focus, 'label').map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
   const sourceSel = document.getElementById('fLeadSource');
   sourceSel.innerHTML = sortByLabel(data.lead_source, 'label').map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+  const industrySel = document.getElementById('fCustomIndustry');
+  industrySel.innerHTML = '<option value="">— none —</option>' +
+    sortByLabel(data.custom_industry, 'label').map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
 }
 
 async function loadOwners() {
@@ -575,6 +582,7 @@ document.getElementById('pushBtn').addEventListener('click', async () => {
       body: JSON.stringify({
         sales_focus: document.getElementById('fSalesFocus').value,
         lead_source: document.getElementById('fLeadSource').value,
+        custom_industry: document.getElementById('fCustomIndustry').value,
         owner_id: document.getElementById('fOwner').value,
         create_tasks: document.getElementById('fCreateTasks').checked,
         task_due_iso: dueLocal ? new Date(dueLocal).toISOString() : null,

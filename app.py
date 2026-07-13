@@ -1850,7 +1850,7 @@ def pull_contacts_hubspot_options():
         return jsonify(_HUBSPOT_OPTIONS_CACHE["data"])
 
     result = {}
-    for prop in ("sales_focus", "lead_source"):
+    for prop in ("sales_focus", "lead_source", "custom_industry"):
         resp = requests.get(f"{BASE_URL}/crm/v3/properties/contacts/{prop}", headers=HEADERS)
         options = resp.json().get("options", []) if resp.ok else []
         result[prop] = [{"label": o["label"], "value": o["value"]} for o in options]
@@ -2178,6 +2178,7 @@ def push_pull_batch(batch_id):
     body = request.get_json()
     sales_focus = body.get("sales_focus", "")
     lead_source = body.get("lead_source", "")
+    custom_industry = body.get("custom_industry", "")
     owner_id = body.get("owner_id") or None
     create_tasks = bool(body.get("create_tasks"))
     task_due_iso = body.get("task_due_iso") or datetime.now(timezone.utc).isoformat()
@@ -2188,7 +2189,7 @@ def push_pull_batch(batch_id):
         ).fetchall()
         candidates = [_candidate_row_to_dict(r) for r in rows]
 
-        results = apollo.push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id)
+        results = apollo.push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id, custom_industry)
 
         pushed_at = datetime.now(timezone.utc).isoformat()
         contact_ids_with_state = []

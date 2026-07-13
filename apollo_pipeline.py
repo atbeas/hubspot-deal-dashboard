@@ -213,7 +213,7 @@ def digits_only(phone):
     return re.sub(r'\D', '', phone or '')
 
 
-def build_hubspot_properties(candidate, sales_focus, lead_source):
+def build_hubspot_properties(candidate, sales_focus, lead_source, custom_industry=''):
     props = {
         'firstname': candidate.get('first_name', ''),
         'lastname': candidate.get('last_name', ''),
@@ -232,7 +232,7 @@ def build_hubspot_properties(candidate, sales_focus, lead_source):
         'lead_source': lead_source,
         'hs_timezone': tz_to_hubspot(candidate.get('time_zone')),
         'industry': candidate.get('industry', ''),
-        'custom_industry': 'MSP' if candidate.get('is_msp') else candidate.get('custom_industry', ''),
+        'custom_industry': custom_industry,
     }
     if candidate.get('mobile_phone'):
         props['mobilephone'] = candidate['mobile_phone']
@@ -251,7 +251,7 @@ def build_hubspot_properties(candidate, sales_focus, lead_source):
     return {k: v for k, v in props.items() if v not in ('', None)}
 
 
-def push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id=None):
+def push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id=None, custom_industry=''):
     """Batch upsert by email. Dedupes by email first -- HubSpot rejects the
     whole batch if any id (email) repeats.
     """
@@ -263,7 +263,7 @@ def push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id=No
         if not email or email in seen:
             continue
         seen.add(email)
-        props = build_hubspot_properties(c, sales_focus, lead_source)
+        props = build_hubspot_properties(c, sales_focus, lead_source, custom_industry)
         if owner_id:
             props['hubspot_owner_id'] = owner_id
         inputs.append({"idProperty": "email", "id": email, "properties": props})
