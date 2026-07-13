@@ -1048,7 +1048,65 @@ def admin():
         status = get_calendar_status(cfg["email"])
         calendars.append({**cfg, **status})
 
-    return render_template("admin.html", companies=companies, calendars=calendars)
+    # Client contacts + eligibility (formerly the standalone /settings page)
+    client_options = []
+    resp = requests.get(f"{BASE_URL}/crm/v3/properties/deals/rs_partner", headers=HEADERS)
+    if resp.ok:
+        client_options = [
+            {"label": o["label"], "value": o["value"]}
+            for o in resp.json().get("options", [])
+            if not o.get("hidden")
+        ]
+    client_options.sort(key=lambda x: x["label"].lower())
+
+    with get_db() as conn:
+        rows = {r["client_value"]: dict(r) for r in conn.execute("SELECT * FROM client_contacts")}
+
+    client_eligibility = get_client_eligibility()
+    for c in client_options:
+        saved = rows.get(c["value"], {})
+        c["email1"] = saved.get("email1", "")
+        c["email2"] = saved.get("email2", "")
+        c["email3"] = saved.get("email3", "")
+        c["name1"]  = saved.get("name1", "")
+        c["name2"]  = saved.get("name2", "")
+        c["name3"]  = saved.get("name3", "")
+        c["meeting_quota"] = saved.get("meeting_quota") or ""
+        c["enabled"] = client_eligibility.get(c["value"], True)
+
+    owners = fetch_hubspot_owners()
+    eligibility = get_owner_eligibility()
+    for o in owners:
+        e = eligibility.get(o["id"], {"am": True, "se": True, "sd": True})
+        o["eligible_am"] = e["am"]
+        o["eligible_se"] = e["se"]
+        o["eligible_sd"] = e["sd"]
+
+    default_calendar = CONNECTED_CALENDARS[0]["email"] if CONNECTED_CALENDARS else ""
+    email_template = prep_template_for(default_calendar) if default_calendar else DEFAULT_EMAIL_TEMPLATE
+    handoff_email_template = handoff_template_for(default_calendar) if default_calendar else DEFAULT_HANDOFF_EMAIL_TEMPLATE
+    email_subject = prep_subject_for(default_calendar) if default_calendar else DEFAULT_EMAIL_SUBJECT_TEMPLATE
+    handoff_email_subject = handoff_subject_for(default_calendar) if default_calendar else DEFAULT_HANDOFF_SUBJECT_TEMPLATE
+
+    return render_template(
+        "admin.html",
+        companies=companies,
+        calendars=calendars,
+        client_options=client_options,
+        owners=owners,
+        connected_calendars=CONNECTED_CALENDARS,
+        default_calendar=default_calendar,
+        email_template=email_template,
+        handoff_email_template=handoff_email_template,
+        email_subject=email_subject,
+        handoff_email_subject=handoff_email_subject,
+    )
+
+
+@app.route("/settings")
+@login_required
+def settings():
+    return redirect(url_for("admin"))
 
 
 @app.route("/api/admin/companies/<company>/password", methods=["POST"])
@@ -1402,63 +1460,6 @@ def send_handoff_email(deal_id):
         """, [deal_id, datetime.now(timezone.utc).isoformat()])
 
     return jsonify({"ok": True})
-
-
-@app.route("/settings")
-@login_required
-def settings():
-    # Fetch rs_partner options from HubSpot
-    client_options = []
-    resp = requests.get(f"{BASE_URL}/crm/v3/properties/deals/rs_partner", headers=HEADERS)
-    if resp.ok:
-        client_options = [
-            {"label": o["label"], "value": o["value"]}
-            for o in resp.json().get("options", [])
-            if not o.get("hidden")
-        ]
-    client_options.sort(key=lambda x: x["label"].lower())
-
-    # Load saved contacts from DB
-    with get_db() as conn:
-        rows = {r["client_value"]: dict(r) for r in conn.execute("SELECT * FROM client_contacts")}
-
-    client_eligibility = get_client_eligibility()
-    for c in client_options:
-        saved = rows.get(c["value"], {})
-        c["email1"] = saved.get("email1", "")
-        c["email2"] = saved.get("email2", "")
-        c["email3"] = saved.get("email3", "")
-        c["name1"]  = saved.get("name1", "")
-        c["name2"]  = saved.get("name2", "")
-        c["name3"]  = saved.get("name3", "")
-        c["meeting_quota"] = saved.get("meeting_quota") or ""
-        c["enabled"] = client_eligibility.get(c["value"], True)
-
-    owners = fetch_hubspot_owners()
-    eligibility = get_owner_eligibility()
-    for o in owners:
-        e = eligibility.get(o["id"], {"am": True, "se": True, "sd": True})
-        o["eligible_am"] = e["am"]
-        o["eligible_se"] = e["se"]
-        o["eligible_sd"] = e["sd"]
-
-    default_calendar = CONNECTED_CALENDARS[0]["email"] if CONNECTED_CALENDARS else ""
-    email_template = prep_template_for(default_calendar) if default_calendar else DEFAULT_EMAIL_TEMPLATE
-    handoff_email_template = handoff_template_for(default_calendar) if default_calendar else DEFAULT_HANDOFF_EMAIL_TEMPLATE
-    email_subject = prep_subject_for(default_calendar) if default_calendar else DEFAULT_EMAIL_SUBJECT_TEMPLATE
-    handoff_email_subject = handoff_subject_for(default_calendar) if default_calendar else DEFAULT_HANDOFF_SUBJECT_TEMPLATE
-
-    return render_template(
-        "settings.html",
-        client_options=client_options,
-        owners=owners,
-        connected_calendars=CONNECTED_CALENDARS,
-        default_calendar=default_calendar,
-        email_template=email_template,
-        handoff_email_template=handoff_email_template,
-        email_subject=email_subject,
-        handoff_email_subject=handoff_email_subject,
-    )
 
 
 @app.route("/api/clients/<client_value>", methods=["POST"])
