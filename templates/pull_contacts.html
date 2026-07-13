@@ -493,8 +493,8 @@ function apolloEnrichedCell(c) {
 }
 
 function hubspotStatusCell(c) {
-  if (c.hubspot_status === 'found') return '<span class="pill pill-bad" title="A live check found this email already in HubSpot">Pushed</span>';
-  if (c.hubspot_status === 'not_found') return '<span class="pill pill-good">Not pushed</span>';
+  if (c.hubspot_status === 'found') return '<span class="pill pill-good" title="A live check found this email already in HubSpot">Pushed</span>';
+  if (c.hubspot_status === 'not_found') return '<span class="pill pill-bad">Not pushed</span>';
   return '<span class="pill pill-pending">Unknown (no email yet)</span>';
 }
 
