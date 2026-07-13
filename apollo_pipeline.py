@@ -254,10 +254,16 @@ def build_hubspot_properties(candidate, sales_focus, lead_source, custom_industr
 def push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id=None, custom_industry=''):
     """Batch upsert by email. Dedupes by email first -- HubSpot rejects the
     whole batch if any id (email) repeats.
+
+    Returns id_by_email (lowercased email -> HubSpot contact id) rather than
+    a positional results list -- HubSpot's batch/upsert response order is NOT
+    guaranteed to match the request order, and each result's own
+    properties.email is the only reliable way to know which candidate it
+    belongs to. (Confirmed live: a 60-contact push came back with 57/60 in a
+    different order than submitted.)
     """
     seen = set()
     inputs = []
-    order = []
     for c in candidates:
         email = c.get('email')
         if not email or email in seen:
@@ -267,18 +273,22 @@ def push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id=No
         if owner_id:
             props['hubspot_owner_id'] = owner_id
         inputs.append({"idProperty": "email", "id": email, "properties": props})
-        order.append(c)
 
-    results = []
+    id_by_email = {}
+    errors = []
     for i in range(0, len(inputs), 100):
         batch = inputs[i:i + 100]
         resp = requests.post(f"{HUBSPOT_BASE}/crm/v3/objects/contacts/batch/upsert",
                               headers=_hubspot_headers(), json={"inputs": batch}, timeout=60)
         if resp.ok:
-            results.extend(resp.json().get("results", []))
+            for r in resp.json().get("results", []):
+                email = (r.get("properties") or {}).get("email")
+                hs_id = r.get("id")
+                if email and hs_id:
+                    id_by_email[email.lower()] = hs_id
         else:
-            results.extend([{"error": resp.text[:300]}] * len(batch))
-    return results
+            errors.append(resp.text[:300])
+    return {"id_by_email": id_by_email, "errors": errors, "attempted": len(inputs)}
 
 
 def create_call_tasks(contact_ids_with_state, owner_id, due_timestamp_iso, task_label="Task 1"):

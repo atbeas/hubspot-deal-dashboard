@@ -2189,12 +2189,14 @@ def push_pull_batch(batch_id):
         ).fetchall()
         candidates = [_candidate_row_to_dict(r) for r in rows]
 
-        results = apollo.push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id, custom_industry)
+        push_result = apollo.push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id, custom_industry)
+        id_by_email = push_result["id_by_email"]
 
         pushed_at = datetime.now(timezone.utc).isoformat()
         contact_ids_with_state = []
-        for c, result in zip([c for c in candidates if c["email"]], results):
-            hs_id = result.get("id")
+        for c in candidates:
+            email = (c.get("email") or "").lower()
+            hs_id = id_by_email.get(email)
             if hs_id:
                 conn.execute(
                     "UPDATE pull_candidates SET hubspot_contact_id = ?, pushed_at = ? WHERE id = ?",
