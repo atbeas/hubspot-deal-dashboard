@@ -237,7 +237,10 @@ def build_hubspot_properties(candidate, sales_focus, lead_source, custom_industr
     if candidate.get('mobile_phone'):
         props['mobilephone'] = candidate['mobile_phone']
     if candidate.get('company_phone'):
-        props['company_phone'] = digits_only(candidate['company_phone'])
+        # HubSpot property 'phone' ("Phone Number", 95k+ real records) is the
+        # actual main-phone field -- NOT 'company_phone' ("X Company Phone",
+        # a near-dead custom property with only ~1.8k records portal-wide).
+        props['phone'] = digits_only(candidate['company_phone'])
     if candidate.get('employees') not in (None, ''):
         props['employees'] = str(candidate['employees'])
         bucket = employee_bucket(candidate['employees'])
