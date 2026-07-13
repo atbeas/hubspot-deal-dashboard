@@ -1909,13 +1909,16 @@ def _attach_prior_pull_info(conn, candidates, current_batch_id):
         FROM pull_candidates pc
         JOIN pull_batches pb ON pb.id = pc.batch_id
         WHERE pc.apollo_person_id IN ({placeholders}) AND pc.batch_id != ?
-        ORDER BY pb.created_at DESC
+        ORDER BY (pc.pushed_at IS NULL) ASC, pb.created_at DESC
     """, person_ids + [current_batch_id]).fetchall()
+    # Ordering puts any pushed occurrence first (most recent among those),
+    # so a later unpushed batch touching the same person can't hide an
+    # earlier real push -- "was this ever pushed" beats "most recent".
 
     prior_by_person = {}
     for r in rows:
         pid = r["apollo_person_id"]
-        if pid not in prior_by_person:  # first hit wins = most recent, thanks to ORDER BY DESC
+        if pid not in prior_by_person:  # first hit wins per the ORDER BY above
             prior_by_person[pid] = {
                 "batch_id": r["batch_id"],
                 "search_name": r["search_name"] or "Untitled pull",
