@@ -221,7 +221,7 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th style="width:30px"></th><th>Name</th><th>Title</th><th>Company</th><th>Email on file</th><th>Direct phone on file</th><th>Seen before?</th></tr></thead>
+          <thead><tr><th style="width:30px"></th><th>Name</th><th>Title</th><th>Company</th><th>Email on file</th><th>Direct phone on file</th><th>Apollo Enriched?</th><th>HubSpot Pushed?</th><th>Seen before?</th></tr></thead>
           <tbody id="scrubBody"></tbody>
         </table>
       </div>
@@ -238,7 +238,7 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th style="width:30px"></th><th>Name</th><th>Company</th><th>Email</th><th>Mobile</th><th>Company Phone</th><th>LinkedIn</th><th>Industry</th><th>Seen before?</th></tr></thead>
+          <thead><tr><th style="width:30px"></th><th>Name</th><th>Company</th><th>Email</th><th>Mobile</th><th>Company Phone</th><th>LinkedIn</th><th>Industry</th><th>Apollo Enriched?</th><th>HubSpot Pushed?</th><th>Seen before?</th></tr></thead>
           <tbody id="enrichBody"></tbody>
         </table>
       </div>
@@ -485,6 +485,19 @@ document.getElementById('runSearchBtn').addEventListener('click', async () => {
   }
 });
 
+function apolloEnrichedCell(c) {
+  if (c.enrich_status === 'done') return '<span class="pill pill-good">Enriched</span>';
+  if (c.enrich_status === 'failed') return '<span class="pill pill-bad">Failed</span>';
+  if (c.enrich_status === 'enriching') return '<span class="pill pill-pending">Enriching…</span>';
+  return '<span class="pill pill-warn">Not enriched</span>';
+}
+
+function hubspotStatusCell(c) {
+  if (c.hubspot_status === 'found') return '<span class="pill pill-bad" title="A live check found this email already in HubSpot">Pushed</span>';
+  if (c.hubspot_status === 'not_found') return '<span class="pill pill-good">Not pushed</span>';
+  return '<span class="pill pill-pending">Unknown (no email yet)</span>';
+}
+
 function seenBeforeCell(c) {
   if (!c.prior_pull) return '<span class="pill pill-good">new</span>';
   const when = formatTimestamp(c.prior_pull.created_at);
@@ -507,9 +520,11 @@ function renderScrubTable() {
       <td>${esc(c.company_name)}</td>
       <td>${c.has_email !== false ? '<span class="pill pill-good">has email</span>' : '<span class="pill pill-bad">none</span>'}</td>
       <td>${c.has_direct_phone ? '<span class="pill pill-good">has phone</span>' : '<span class="pill pill-warn">none</span>'}</td>
+      <td>${apolloEnrichedCell(c)}</td>
+      <td>${hubspotStatusCell(c)}</td>
       <td>${seenBeforeCell(c)}</td>
     </tr>
-  `).join('') || '<tr><td colspan="7" class="empty-hint">No results — try widening your criteria</td></tr>';
+  `).join('') || '<tr><td colspan="9" class="empty-hint">No results — try widening your criteria</td></tr>';
 }
 
 function toggleCandidate(id, keep) {
@@ -564,9 +579,11 @@ function renderEnrichTable() {
         <td>${esc(c.company_phone) || '—'}</td>
         <td>${c.linkedin_url ? '<span class="pill pill-good">yes</span>' : '<span class="pill pill-bad">no</span>'}</td>
         <td>${esc(c.industry) || '—'}</td>
+        <td>${apolloEnrichedCell(c)}</td>
+        <td>${hubspotStatusCell(c)}</td>
         <td>${seenBeforeCell(c)}</td>
       </tr>`;
-  }).join('') || '<tr><td colspan="9" class="empty-hint">Nothing kept from the scrub step</td></tr>';
+  }).join('') || '<tr><td colspan="11" class="empty-hint">Nothing kept from the scrub step</td></tr>';
 }
 
 function pollEnrichProgress() {
@@ -624,10 +641,16 @@ function renderPushSummary() {
   const newCount = kept.filter(c => !c.prior_pull).length;
   const seenCount = kept.filter(c => c.prior_pull && !c.prior_pull.pushed_at).length;
   const pushedCount = kept.filter(c => c.prior_pull && c.prior_pull.pushed_at).length;
+  const enrichedCount = kept.filter(c => c.enrich_status === 'done').length;
+  const hsFoundCount = kept.filter(c => c.hubspot_status === 'found').length;
+  const hsNotFoundCount = kept.filter(c => c.hubspot_status === 'not_found').length;
   document.getElementById('pushSeenSummary').innerHTML = `
     <div class="summary-chip"><b>${newCount}</b> new</div>
     <div class="summary-chip"><b>${seenCount}</b> seen before, not pushed</div>
-    <div class="summary-chip"><b>${pushedCount}</b> already pushed</div>
+    <div class="summary-chip"><b>${pushedCount}</b> already pushed (our history)</div>
+    <div class="summary-chip"><b>${enrichedCount}</b> / ${kept.length} Apollo enriched</div>
+    <div class="summary-chip"><b>${hsFoundCount}</b> already in HubSpot (live check)</div>
+    <div class="summary-chip"><b>${hsNotFoundCount}</b> confirmed not in HubSpot</div>
   `;
 }
 

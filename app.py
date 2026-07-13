@@ -160,6 +160,10 @@ def init_db():
                 pushed_at TEXT
             )
         """)
+        try:
+            conn.execute("ALTER TABLE pull_candidates ADD COLUMN hubspot_status TEXT NOT NULL DEFAULT 'unknown'")
+        except sqlite3.OperationalError:
+            pass
         existing = conn.execute("SELECT COUNT(*) c FROM saved_searches").fetchone()["c"]
         if existing == 0:
             conn.execute(
@@ -1889,6 +1893,7 @@ def _candidate_row_to_dict(row):
         "time_zone": row["time_zone"],
         "hubspot_contact_id": row["hubspot_contact_id"],
         "pushed_at": row["pushed_at"],
+        "hubspot_status": row["hubspot_status"],
     }
 
 
@@ -1957,6 +1962,26 @@ def _attach_prior_pull_info(conn, candidates, current_batch_id):
         c["prior_pull"] = prior
         c["auto_excluded_recent"] = _within_recent_pull_window(prior)
     return candidates
+
+
+def _refresh_hubspot_status(conn, batch_id):
+    """Live-checks HubSpot by email for any candidate in this batch we
+    haven't checked yet. This is deliberately separate from our own
+    pushed_at/prior_pull tracking -- a contact pushed to HubSpot by some
+    other route (manual import, a different workflow) would never show up
+    in our pull_batches history, so the only reliable answer to "is this
+    already in HubSpot" is to ask HubSpot directly.
+    """
+    rows = conn.execute(
+        "SELECT id, email FROM pull_candidates WHERE batch_id = ? AND email != '' AND hubspot_status = 'unknown'",
+        [batch_id]
+    ).fetchall()
+    if not rows:
+        return
+    found = apollo.check_hubspot_existence([r["email"] for r in rows])
+    for r in rows:
+        status = "found" if r["email"].lower() in found else "not_found"
+        conn.execute("UPDATE pull_candidates SET hubspot_status = ? WHERE id = ?", [status, r["id"]])
 
 
 @app.route("/pull-contacts")
@@ -2049,6 +2074,7 @@ def run_pull_search():
                   mobile_phone, "found" if mobile_phone else "pending",
                   c.get("company_phone", ""), c.get("website", ""), c.get("company_linkedin_url", ""),
                   c.get("city", ""), c.get("state", "")])
+        _refresh_hubspot_status(conn, batch_id)
         rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
         candidates = _attach_prior_pull_info(conn, [_candidate_row_to_dict(r) for r in rows], batch_id)
 
@@ -2096,6 +2122,7 @@ def get_pull_batch(batch_id):
         batch = conn.execute("SELECT * FROM pull_batches WHERE id = ?", [batch_id]).fetchone()
         if not batch:
             return jsonify({"error": "not found"}), 404
+        _refresh_hubspot_status(conn, batch_id)
         rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
         candidates = _attach_prior_pull_info(conn, [_candidate_row_to_dict(r) for r in rows], batch_id)
     return jsonify({
@@ -2209,6 +2236,9 @@ def _run_enrich_batch(batch_id):
             "UPDATE pull_candidates SET enrich_status = 'done' WHERE batch_id = ? AND keep = 1 AND enrich_status = 'enriching'",
             [batch_id]
         )
+        conn.commit()
+
+        _refresh_hubspot_status(conn, batch_id)
         conn.commit()
     finally:
         conn.close()

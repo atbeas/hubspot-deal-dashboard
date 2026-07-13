@@ -356,6 +356,32 @@ def push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id=No
     return {"id_by_email": id_by_email, "errors": errors, "attempted": len(inputs)}
 
 
+def check_hubspot_existence(emails):
+    """Live batch/read by email against HubSpot -- tells us whether a contact
+    already exists in the CRM regardless of whether OUR pipeline is the one
+    that put it there (a contact pushed via manual import, another workflow,
+    etc. would never show up in our own pull_batches history, so this is the
+    only reliable way to check). Returns lowercased email -> hubspot_contact_id
+    for every email found; missing keys mean "not found".
+    """
+    found = {}
+    unique_emails = list({e for e in emails if e})
+    for i in range(0, len(unique_emails), 100):
+        batch = unique_emails[i:i + 100]
+        resp = requests.post(f"{HUBSPOT_BASE}/crm/v3/objects/contacts/batch/read",
+                              headers=_hubspot_headers(),
+                              json={"idProperty": "email", "properties": ["email"],
+                                    "inputs": [{"id": e} for e in batch]},
+                              timeout=30)
+        if not resp.ok:
+            continue
+        for r in resp.json().get("results", []):
+            email = (r.get("properties") or {}).get("email")
+            if email:
+                found[email.lower()] = r.get("id")
+    return found
+
+
 def create_call_tasks(contact_ids_with_state, owner_id, due_timestamp_iso, task_label="Task 1"):
     """One CALL task per contact: 'MSP | {State} | {task_label}', associated
     to the contact at creation time (associationTypeId 204).
