@@ -2,6 +2,7 @@ import os
 import json
 import sqlite3
 import secrets
+import threading
 import requests
 import concurrent.futures
 from functools import wraps
@@ -1990,46 +1991,57 @@ def toggle_pull_candidates(batch_id):
     return jsonify({"ok": True})
 
 
-@app.route("/api/pull-contacts/batches/<int:batch_id>/enrich", methods=["POST"])
-@login_required
-def enrich_pull_batch(batch_id):
-    with get_db() as conn:
-        rows = conn.execute(
+def _run_enrich_batch(batch_id):
+    """Does the actual Apollo reveal + org enrichment work. Runs in a
+    background thread (kicked off by enrich_pull_batch below) so a batch of
+    dozens/hundreds of candidates can't blow past the gunicorn request
+    timeout -- that previously killed the worker mid-loop and, since the
+    whole loop shared one uncommitted transaction, silently discarded every
+    row it had already enriched. Each row now commits on its own connection
+    as soon as it's done, so a crash here only loses the one row in flight.
+    """
+    conn = get_db()
+    try:
+        rows = [dict(r) for r in conn.execute(
             "SELECT * FROM pull_candidates WHERE batch_id = ? AND keep = 1", [batch_id]
-        ).fetchall()
+        ).fetchall()]
 
         webhook_url = f"{PULL_CONTACTS_HOST}/api/pull-contacts/apollo-webhook?key={APOLLO_WEBHOOK_SECRET}"
 
-        # Step 1: reveal email + core profile for each candidate (synchronous)
-        org_ids_needed = set()
-        for r in rows:
+        def reveal_one(r):
             try:
                 revealed = apollo.reveal_email(r["apollo_person_id"])
             except requests.RequestException:
-                conn.execute("UPDATE pull_candidates SET enrich_status = 'failed' WHERE id = ?", [r["id"]])
-                continue
-            conn.execute("""
-                UPDATE pull_candidates SET
-                    email = ?, email_status = ?, linkedin_url = ?, apollo_contact_id = ?,
-                    organization_id = ?, time_zone = ?, first_name = ?, last_name = ?,
-                    enrich_status = 'enriching'
-                WHERE id = ?
-            """, [revealed["email"], revealed["email_status"], revealed["linkedin_url"],
-                  revealed["apollo_contact_id"], revealed["organization_id"], revealed["time_zone"],
-                  revealed["first_name"] or r["first_name"], revealed["last_name"] or r["last_name"],
-                  r["id"]])
-            if revealed["organization_id"]:
-                org_ids_needed.add(revealed["organization_id"])
-
-            # Step 2: submit async mobile phone reveal (fire and forget --
-            # the webhook route below fills in the result as it arrives)
+                return (r["id"], r, None)
             try:
                 apollo.submit_phone_reveal(r["apollo_person_id"], webhook_url)
             except requests.RequestException:
                 pass
+            return (r["id"], r, revealed)
 
-        # Step 3: company enrichment, one call per org (bulk_enrich needs a
-        # domain we don't have yet at this point, so use the per-id lookup)
+        org_ids_needed = set()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            for cand_id, r, revealed in pool.map(reveal_one, rows):
+                if revealed is None:
+                    conn.execute("UPDATE pull_candidates SET enrich_status = 'failed' WHERE id = ?", [cand_id])
+                    conn.commit()
+                    continue
+                conn.execute("""
+                    UPDATE pull_candidates SET
+                        email = ?, email_status = ?, linkedin_url = ?, apollo_contact_id = ?,
+                        organization_id = ?, time_zone = ?, first_name = ?, last_name = ?,
+                        enrich_status = 'enriching'
+                    WHERE id = ?
+                """, [revealed["email"], revealed["email_status"], revealed["linkedin_url"],
+                      revealed["apollo_contact_id"], revealed["organization_id"], revealed["time_zone"],
+                      revealed["first_name"] or r["first_name"], revealed["last_name"] or r["last_name"],
+                      cand_id])
+                conn.commit()
+                if revealed["organization_id"]:
+                    org_ids_needed.add(revealed["organization_id"])
+
+        # Company enrichment, one call per org (bulk_enrich needs a domain we
+        # don't have yet at this point, so use the per-id lookup)
         for org_id in org_ids_needed:
             org = apollo.enrich_org_by_id(org_id)
             if not org:
@@ -2045,15 +2057,31 @@ def enrich_pull_batch(batch_id):
                   org.get("state", ""), org.get("city", ""), org.get("estimated_num_employees"),
                   org.get("organization_revenue"), org.get("industry", ""),
                   batch_id, org_id])
+            conn.commit()
 
         conn.execute(
             "UPDATE pull_candidates SET enrich_status = 'done' WHERE batch_id = ? AND keep = 1 AND enrich_status = 'enriching'",
             [batch_id]
         )
-        conn.execute("UPDATE pull_batches SET stage = 'enriching' WHERE id = ?", [batch_id])
-        updated_rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
+        conn.commit()
+    finally:
+        conn.close()
 
-    return jsonify({"candidates": [_candidate_row_to_dict(r) for r in updated_rows]})
+
+@app.route("/api/pull-contacts/batches/<int:batch_id>/enrich", methods=["POST"])
+@login_required
+def enrich_pull_batch(batch_id):
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE pull_candidates SET enrich_status = 'enriching' WHERE batch_id = ? AND keep = 1",
+            [batch_id]
+        )
+        conn.execute("UPDATE pull_batches SET stage = 'enriching' WHERE id = ?", [batch_id])
+        rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
+
+    threading.Thread(target=_run_enrich_batch, args=(batch_id,), daemon=True).start()
+
+    return jsonify({"candidates": [_candidate_row_to_dict(r) for r in rows]})
 
 
 @app.route("/api/pull-contacts/apollo-webhook", methods=["POST"])

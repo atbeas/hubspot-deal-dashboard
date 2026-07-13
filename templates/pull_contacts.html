@@ -216,7 +216,7 @@
     <div class="panel" id="panelEnrich" style="display:none">
       <div class="panel-title">③ Enrich &amp; check completeness</div>
       <div class="summary-strip">
-        <div class="summary-chip"><b id="enrichDone">0</b> / <span id="enrichTotal">0</span> mobile lookups resolved</div>
+        <div class="summary-chip"><b id="enrichDone">0</b> / <span id="enrichTotal">0</span> fully resolved (email/company + mobile)</div>
       </div>
       <div class="table-wrap">
         <table>
@@ -424,8 +424,15 @@ document.getElementById('continueToEnrichBtn').addEventListener('click', async (
 function renderEnrichTable() {
   const kept = currentCandidates.filter(c => c.keep);
   document.getElementById('enrichTotal').textContent = kept.length;
-  document.getElementById('enrichDone').textContent = kept.filter(c => c.mobile_status !== 'pending').length;
+  document.getElementById('enrichDone').textContent = kept.filter(
+    c => c.enrich_status !== 'enriching' && c.mobile_status !== 'pending'
+  ).length;
   document.getElementById('enrichBody').innerHTML = kept.map(c => {
+    let emailCell = '<span class="pill pill-pending">looking up…</span>';
+    if (c.enrich_status === 'failed') emailCell = '<span class="pill pill-bad">lookup failed</span>';
+    else if (c.enrich_status === 'done' || c.enrich_status === 'enriching') {
+      emailCell = c.email ? esc(c.email) : '<span class="pill pill-bad">none</span>';
+    }
     let mobilePill = '<span class="pill pill-pending">pending…</span>';
     if (c.mobile_status === 'found') mobilePill = `<span class="pill pill-good">${esc(c.mobile_phone)}</span>`;
     if (c.mobile_status === 'not_found') mobilePill = '<span class="pill pill-bad">not found</span>';
@@ -434,7 +441,7 @@ function renderEnrichTable() {
         <td><input type="checkbox" checked onchange="toggleCandidate(${c.id}, this.checked)" /></td>
         <td>${esc(c.first_name)} ${esc(c.last_name)}</td>
         <td>${esc(c.company_name)}</td>
-        <td>${c.email ? esc(c.email) : '<span class="pill pill-bad">none</span>'}</td>
+        <td>${emailCell}</td>
         <td>${mobilePill}</td>
         <td>${esc(c.company_phone) || '—'}</td>
         <td>${c.linkedin_url ? '<span class="pill pill-good">yes</span>' : '<span class="pill pill-bad">no</span>'}</td>
@@ -450,7 +457,9 @@ function pollEnrichProgress() {
     const data = await resp.json();
     currentCandidates = data.candidates;
     renderEnrichTable();
-    const stillPending = currentCandidates.some(c => c.keep && c.mobile_status === 'pending');
+    const stillPending = currentCandidates.some(
+      c => c.keep && (c.enrich_status === 'enriching' || c.mobile_status === 'pending')
+    );
     if (!stillPending) clearInterval(enrichPollTimer);
   }, 4000);
 }
