@@ -238,7 +238,7 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th style="width:30px"></th><th>Name</th><th>Company</th><th>Email</th><th>Mobile</th><th>Company Phone</th><th>LinkedIn</th><th>Industry</th></tr></thead>
+          <thead><tr><th style="width:30px"></th><th>Name</th><th>Company</th><th>Email</th><th>Mobile</th><th>Company Phone</th><th>LinkedIn</th><th>Industry</th><th>Seen before?</th></tr></thead>
           <tbody id="enrichBody"></tbody>
         </table>
       </div>
@@ -254,6 +254,7 @@
     <!-- Stage 4: Push -->
     <div class="panel" id="panelPush" style="display:none">
       <div class="panel-title">④ Tag &amp; push to HubSpot</div>
+      <div class="summary-strip" id="pushSeenSummary"></div>
       <div class="field-grid">
         <div class="field">
           <label>Sales-Client Focus</label>
@@ -298,18 +299,29 @@ const LAST_BATCH_KEY = 'pc_active_batch_id';
 
 function esc(s) { return (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+const STAGES = ['define', 'scrub', 'enrich', 'push'];
+let maxStageReached = 'define';
+
 function setStage(stage) {
-  const stages = ['define', 'scrub', 'enrich', 'push'];
+  const idx = STAGES.indexOf(stage);
+  const maxIdx = STAGES.indexOf(maxStageReached);
   document.getElementById('panelDefine').style.display = stage === 'define' ? '' : 'none';
   document.getElementById('panelScrub').style.display = stage === 'scrub' ? '' : 'none';
   document.getElementById('panelEnrich').style.display = stage === 'enrich' ? '' : 'none';
   document.getElementById('panelPush').style.display = stage === 'push' ? '' : 'none';
-  document.getElementById('stepper').innerHTML = stages.map((s, i) => {
-    const idx = stages.indexOf(stage);
+  document.getElementById('stepper').innerHTML = STAGES.map((s, i) => {
     const cls = i < idx ? 'done' : (i === idx ? 'current' : '');
+    const clickable = i <= maxIdx && i !== idx;
     const labels = {define: '① Define ICP', scrub: '② Scrub', enrich: '③ Enrich', push: '④ Tag & Push'};
-    return `<span class="step-pill ${cls}">${labels[s]}</span>`;
+    return `<span class="step-pill ${cls}"${clickable ? ` style="cursor:pointer" onclick="goToStage('${s}')"` : ''}>${labels[s]}</span>`;
   }).join('');
+}
+
+async function goToStage(stage) {
+  if (stage === 'scrub') renderScrubTable();
+  else if (stage === 'enrich') renderEnrichTable();
+  else if (stage === 'push') await preparePushPanel();
+  setStage(stage);
 }
 
 function csvToList(id) {
@@ -387,6 +399,7 @@ document.getElementById('newSearchBtn').addEventListener('click', () => {
   currentBatchId = null;
   currentCandidates = [];
   localStorage.removeItem(LAST_BATCH_KEY);
+  maxStageReached = 'define';
   setStage('define');
 });
 
@@ -426,9 +439,11 @@ async function resumeBatch(id) {
     document.getElementById('totalFound').textContent = data.total_entries || currentCandidates.length;
     document.getElementById('totalShown').textContent = currentCandidates.length;
     document.getElementById('scrubTruncatedNote').style.display = 'none';
+    maxStageReached = 'scrub';
     renderScrubTable();
     setStage('scrub');
   } else {
+    maxStageReached = 'enrich';
     renderEnrichTable();
     setStage('enrich');
     const stillPending = currentCandidates.some(c => c.keep && (c.enrich_status === 'enriching' || c.mobile_status === 'pending'));
@@ -461,6 +476,7 @@ document.getElementById('runSearchBtn').addEventListener('click', async () => {
     document.getElementById('totalFound').textContent = data.total_entries;
     document.getElementById('totalShown').textContent = data.candidates.length;
     document.getElementById('scrubTruncatedNote').style.display = data.truncated ? '' : 'none';
+    maxStageReached = 'scrub';
     renderScrubTable();
     setStage('scrub');
     loadPastBatches();
@@ -513,6 +529,7 @@ document.getElementById('continueToEnrichBtn').addEventListener('click', async (
     const resp = await fetch(`/api/pull-contacts/batches/${currentBatchId}/enrich`, {method: 'POST'});
     const data = await resp.json();
     currentCandidates = data.candidates;
+    maxStageReached = 'enrich';
     renderEnrichTable();
     setStage('enrich');
     pollEnrichProgress();
@@ -547,8 +564,9 @@ function renderEnrichTable() {
         <td>${esc(c.company_phone) || '—'}</td>
         <td>${c.linkedin_url ? '<span class="pill pill-good">yes</span>' : '<span class="pill pill-bad">no</span>'}</td>
         <td>${esc(c.industry) || '—'}</td>
+        <td>${seenBeforeCell(c)}</td>
       </tr>`;
-  }).join('') || '<tr><td colspan="8" class="empty-hint">Nothing kept from the scrub step</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="empty-hint">Nothing kept from the scrub step</td></tr>';
 }
 
 function pollEnrichProgress() {
@@ -601,13 +619,33 @@ async function loadOwners() {
   document.getElementById('fOwner').innerHTML = sortByLabel(data.owners, 'name').map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
 }
 
-document.getElementById('continueToPushBtn').addEventListener('click', async () => {
-  setStage('push');
+function renderPushSummary() {
+  const kept = currentCandidates.filter(c => c.keep);
+  const newCount = kept.filter(c => !c.prior_pull).length;
+  const seenCount = kept.filter(c => c.prior_pull && !c.prior_pull.pushed_at).length;
+  const pushedCount = kept.filter(c => c.prior_pull && c.prior_pull.pushed_at).length;
+  document.getElementById('pushSeenSummary').innerHTML = `
+    <div class="summary-chip"><b>${newCount}</b> new</div>
+    <div class="summary-chip"><b>${seenCount}</b> seen before, not pushed</div>
+    <div class="summary-chip"><b>${pushedCount}</b> already pushed</div>
+  `;
+}
+
+async function preparePushPanel() {
   if (!document.getElementById('fSalesFocus').options.length) await loadHubspotOptions();
   if (!document.getElementById('fOwner').options.length) await loadOwners();
-  const now = new Date();
-  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-  document.getElementById('fTaskDue').value = now.toISOString().slice(0, 16);
+  if (!document.getElementById('fTaskDue').value) {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    document.getElementById('fTaskDue').value = now.toISOString().slice(0, 16);
+  }
+  renderPushSummary();
+}
+
+document.getElementById('continueToPushBtn').addEventListener('click', async () => {
+  maxStageReached = 'push';
+  await preparePushPanel();
+  setStage('push');
 });
 
 document.getElementById('pushBtn').addEventListener('click', async () => {
