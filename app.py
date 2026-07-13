@@ -1904,7 +1904,7 @@ def list_saved_searches():
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM saved_searches ORDER BY name").fetchall()
     return jsonify({"searches": [
-        {"id": r["id"], "name": r["name"], "criteria": json.loads(r["criteria_json"])}
+        {"id": r["id"], "name": r["name"], "criteria": json.loads(r["criteria_json"]), "created_at": r["created_at"]}
         for r in rows
     ]})
 
