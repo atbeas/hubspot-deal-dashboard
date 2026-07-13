@@ -478,19 +478,23 @@ document.getElementById('applyFilterBtn').addEventListener('click', async () => 
   renderEnrichTable();
 });
 
+function sortByLabel(list, key) {
+  return [...list].sort((a, b) => a[key].localeCompare(b[key], undefined, {sensitivity: 'base'}));
+}
+
 async function loadHubspotOptions() {
   const resp = await fetch('/api/pull-contacts/hubspot-options');
   const data = await resp.json();
   const focusSel = document.getElementById('fSalesFocus');
-  focusSel.innerHTML = data.sales_focus.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+  focusSel.innerHTML = sortByLabel(data.sales_focus, 'label').map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
   const sourceSel = document.getElementById('fLeadSource');
-  sourceSel.innerHTML = data.lead_source.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+  sourceSel.innerHTML = sortByLabel(data.lead_source, 'label').map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
 }
 
 async function loadOwners() {
   const resp = await fetch('/api/owners');
   const data = await resp.json();
-  document.getElementById('fOwner').innerHTML = data.owners.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
+  document.getElementById('fOwner').innerHTML = sortByLabel(data.owners, 'name').map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
 }
 
 document.getElementById('continueToPushBtn').addEventListener('click', async () => {
