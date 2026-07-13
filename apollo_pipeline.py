@@ -88,6 +88,68 @@ def search_apollo_all(criteria, max_results=MAX_SEARCH_RESULTS):
     return {"total_entries": total_entries, "candidates": candidates[:max_results], "truncated": truncated}
 
 
+LIST_PULL_PAGE_SIZE = 100
+MAX_LIST_RESULTS = 2000
+
+
+def pull_apollo_list(label_id, max_results=MAX_LIST_RESULTS):
+    """Pulls an existing saved Apollo list/label (e.g. "PL MSPs") instead of
+    running a net-new ICP search. Unlike search_apollo, these are already-
+    saved contacts -- real (non-obfuscated) names, and often already have
+    email/mobile/org data from prior enrichment, which we carry through so
+    the Enrich stage doesn't burn credits re-revealing what's already known.
+    """
+    all_contacts = []
+    page = 1
+    while len(all_contacts) < max_results:
+        resp = requests.post(f"{APOLLO_BASE}/v1/contacts/search",
+                              headers=_apollo_headers(),
+                              json={"label_ids": [label_id], "per_page": LIST_PULL_PAGE_SIZE, "page": page},
+                              timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        contacts = data.get("contacts", [])
+        if not contacts:
+            break
+        all_contacts.extend(contacts)
+        total_pages = data.get("pagination", {}).get("total_pages", 1)
+        if page >= total_pages:
+            break
+        page += 1
+
+    total_entries = data.get("pagination", {}).get("total_entries", len(all_contacts)) if all_contacts else 0
+    truncated = total_entries > len(all_contacts)
+    all_contacts = all_contacts[:max_results]
+
+    candidates = []
+    for c in all_contacts:
+        org = c.get("organization") or {}
+        phones = c.get("phone_numbers") or []
+        mobile = next((p.get("sanitized_number") or p.get("raw_number") for p in phones if p.get("type") == "mobile"), "")
+        other_phone = next((p.get("sanitized_number") or p.get("raw_number") for p in phones if p.get("type") != "mobile"), "")
+        candidates.append({
+            "apollo_person_id": c.get("person_id") or c.get("id"),
+            "apollo_contact_id": c.get("id"),
+            "organization_id": c.get("organization_id") or org.get("id"),
+            "first_name": c.get("first_name", ""),
+            "last_name": c.get("last_name", ""),
+            "title": c.get("title", ""),
+            "company_name": org.get("name") or c.get("organization_name", ""),
+            "has_email": bool(c.get("email")),
+            "has_direct_phone": bool(other_phone or mobile),
+            "email": c.get("email", ""),
+            "email_status": c.get("email_status", ""),
+            "linkedin_url": c.get("linkedin_url", ""),
+            "mobile_phone": mobile,
+            "company_phone": other_phone or org.get("sanitized_phone", ""),
+            "website": org.get("website_url", ""),
+            "company_linkedin_url": org.get("linkedin_url", ""),
+            "city": c.get("city", ""),
+            "state": c.get("state", ""),
+        })
+    return {"total_entries": total_entries, "candidates": candidates, "truncated": truncated}
+
+
 # --------------------------------------------------------------- reveal -----
 
 def reveal_email(apollo_person_id):

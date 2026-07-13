@@ -2008,7 +2008,10 @@ def run_pull_search():
     criteria = body.get("criteria") or {}
     search_name = body.get("search_name", "")
 
-    result = apollo.search_apollo_all(criteria)
+    if criteria.get("apollo_list_id"):
+        result = apollo.pull_apollo_list(criteria["apollo_list_id"])
+    else:
+        result = apollo.search_apollo_all(criteria)
 
     with get_db() as conn:
         cur = conn.execute(
@@ -2027,12 +2030,25 @@ def run_pull_search():
         for c in result["candidates"]:
             prior = prior_by_person.get(c["apollo_person_id"])
             default_keep = 0 if _within_recent_pull_window(prior) else 1
+            # Candidates pulled from an existing Apollo list (not a fresh ICP
+            # search) often already have email/mobile/org data -- persist it
+            # now so Enrich can skip re-revealing what's already known.
+            email = c.get("email", "")
+            mobile_phone = c.get("mobile_phone", "")
             conn.execute("""
                 INSERT INTO pull_candidates
-                    (batch_id, apollo_person_id, first_name, last_name, title, company_name, keep)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, [batch_id, c["apollo_person_id"], c["first_name"], c["last_name"],
-                  c["title"], c["company_name"], default_keep])
+                    (batch_id, apollo_person_id, apollo_contact_id, organization_id,
+                     first_name, last_name, title, company_name, keep,
+                     email, email_status, linkedin_url, enrich_status,
+                     mobile_phone, mobile_status,
+                     company_phone, website, company_linkedin_url, city, state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [batch_id, c["apollo_person_id"], c.get("apollo_contact_id"), c.get("organization_id"),
+                  c["first_name"], c["last_name"], c["title"], c["company_name"], default_keep,
+                  email, c.get("email_status", ""), c.get("linkedin_url", ""), "done" if email else "pending",
+                  mobile_phone, "found" if mobile_phone else "pending",
+                  c.get("company_phone", ""), c.get("website", ""), c.get("company_linkedin_url", ""),
+                  c.get("city", ""), c.get("state", "")])
         rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
         candidates = _attach_prior_pull_info(conn, [_candidate_row_to_dict(r) for r in rows], batch_id)
 
@@ -2123,6 +2139,22 @@ def _run_enrich_batch(batch_id):
 
         webhook_url = f"{PULL_CONTACTS_HOST}/api/pull-contacts/apollo-webhook?key={APOLLO_WEBHOOK_SECRET}"
 
+        # Candidates already carrying an email (e.g. pulled from an existing
+        # Apollo list, not a fresh ICP search) skip the reveal call entirely
+        # -- no point spending a credit re-revealing what we already have.
+        already_known = [r for r in rows if r["email"]]
+        needs_reveal = [r for r in rows if not r["email"]]
+
+        org_ids_needed = set(r["organization_id"] for r in already_known if r["organization_id"])
+        for r in already_known:
+            if not r["mobile_phone"]:
+                try:
+                    apollo.submit_phone_reveal(r["apollo_person_id"], webhook_url)
+                except requests.RequestException:
+                    pass
+            conn.execute("UPDATE pull_candidates SET enrich_status = 'done' WHERE id = ?", [r["id"]])
+            conn.commit()
+
         def reveal_one(r):
             try:
                 revealed = apollo.reveal_email(r["apollo_person_id"])
@@ -2134,9 +2166,8 @@ def _run_enrich_batch(batch_id):
                 pass
             return (r["id"], r, revealed)
 
-        org_ids_needed = set()
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            for cand_id, r, revealed in pool.map(reveal_one, rows):
+            for cand_id, r, revealed in pool.map(reveal_one, needs_reveal):
                 if revealed is None:
                     conn.execute("UPDATE pull_candidates SET enrich_status = 'failed' WHERE id = ?", [cand_id])
                     conn.commit()
@@ -2187,8 +2218,11 @@ def _run_enrich_batch(batch_id):
 @login_required
 def enrich_pull_batch(batch_id):
     with get_db() as conn:
+        # Candidates pulled from an existing Apollo list may already be
+        # marked 'done' (email known at ingestion) -- don't reset those back
+        # to 'enriching', only the ones that genuinely still need a reveal.
         conn.execute(
-            "UPDATE pull_candidates SET enrich_status = 'enriching' WHERE batch_id = ? AND keep = 1",
+            "UPDATE pull_candidates SET enrich_status = 'enriching' WHERE batch_id = ? AND keep = 1 AND enrich_status != 'done'",
             [batch_id]
         )
         conn.execute("UPDATE pull_batches SET stage = 'enriching' WHERE id = ?", [batch_id])

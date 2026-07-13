@@ -193,6 +193,11 @@
           <input type="text" id="fKeywords" placeholder="e.g. managed service provider" />
           <div class="hint">Matched against Apollo's company keyword tags — this is the main industry filter.</div>
         </div>
+        <div class="field">
+          <label>Or: pull an existing Apollo list</label>
+          <input type="text" id="fApolloListId" placeholder="Apollo list/label ID (leave blank for ICP search)" />
+          <div class="hint">If filled, this pulls that saved Apollo list directly instead of running the ICP search above — already-known email/phone/org data carries over so Enrich only fills gaps.</div>
+        </div>
       </div>
       <div class="btn-row">
         <button class="btn btn-primary" id="runSearchBtn" type="button">Search Apollo</button>
@@ -312,6 +317,10 @@ function csvToList(id) {
 }
 
 function collectCriteria() {
+  const listId = document.getElementById('fApolloListId').value.trim();
+  if (listId) {
+    return { apollo_list_id: listId };
+  }
   const empMin = document.getElementById('fEmpMin').value;
   const empMax = document.getElementById('fEmpMax').value;
   return {
@@ -325,6 +334,7 @@ function collectCriteria() {
 }
 
 function fillCriteriaForm(criteria) {
+  document.getElementById('fApolloListId').value = criteria.apollo_list_id || '';
   document.getElementById('fLocations').value = (criteria.locations || []).join(', ');
   document.getElementById('fEmpMin').value = criteria.employee_min ?? '';
   document.getElementById('fEmpMax').value = criteria.employee_max ?? '';
