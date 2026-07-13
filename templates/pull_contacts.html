@@ -195,8 +195,11 @@
       <div class="panel-title">② Scrub results</div>
       <div class="summary-strip">
         <div class="summary-chip"><b id="totalFound">0</b> matched in Apollo</div>
-        <div class="summary-chip"><b id="totalShown">0</b> shown this page</div>
+        <div class="summary-chip"><b id="totalShown">0</b> pulled in</div>
         <div class="summary-chip"><b id="totalKept">0</b> kept</div>
+      </div>
+      <div class="hint" id="scrubTruncatedNote" style="display:none;color:#fbbf24;margin-bottom:10px">
+        This search matched more than 1000 people in Apollo — showing the first 1000. Narrow the criteria (titles, keyword, employee range) to capture the rest.
       </div>
       <div class="table-wrap">
         <table>
@@ -370,6 +373,7 @@ document.getElementById('runSearchBtn').addEventListener('click', async () => {
     currentCandidates = data.candidates;
     document.getElementById('totalFound').textContent = data.total_entries;
     document.getElementById('totalShown').textContent = data.candidates.length;
+    document.getElementById('scrubTruncatedNote').style.display = data.truncated ? '' : 'none';
     renderScrubTable();
     setStage('scrub');
   } finally {

@@ -1936,7 +1936,7 @@ def run_pull_search():
     criteria = body.get("criteria") or {}
     search_name = body.get("search_name", "")
 
-    result = apollo.search_apollo(criteria, page=body.get("page", 1), per_page=body.get("per_page", 25))
+    result = apollo.search_apollo_all(criteria)
 
     with get_db() as conn:
         cur = conn.execute(
@@ -1956,6 +1956,7 @@ def run_pull_search():
     return jsonify({
         "batch_id": batch_id,
         "total_entries": result["total_entries"],
+        "truncated": result.get("truncated", False),
         "candidates": [_candidate_row_to_dict(r) for r in rows],
     })
 

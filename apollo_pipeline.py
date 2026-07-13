@@ -60,6 +60,34 @@ def search_apollo(criteria, page=1, per_page=25):
     return {"total_entries": data.get("total_entries", 0), "candidates": candidates}
 
 
+# Apollo caps mixed_people/api_search at 100 results per page. Browsing this
+# preview-only stage doesn't spend reveal credits, so it's safe to page through
+# everything -- capped here just to keep a single batch from ballooning into
+# an unbounded pull on a very wide (e.g. nationwide, no keyword) search.
+APOLLO_SEARCH_PAGE_SIZE = 100
+MAX_SEARCH_RESULTS = 1000
+
+
+def search_apollo_all(criteria, max_results=MAX_SEARCH_RESULTS):
+    """Pages through Apollo's ICP search until every match is fetched (or
+    max_results is hit) instead of returning just the first page."""
+    first = search_apollo(criteria, page=1, per_page=APOLLO_SEARCH_PAGE_SIZE)
+    total_entries = first["total_entries"]
+    candidates = list(first["candidates"])
+    to_fetch = min(total_entries, max_results)
+
+    page = 2
+    while len(candidates) < to_fetch:
+        result = search_apollo(criteria, page=page, per_page=APOLLO_SEARCH_PAGE_SIZE)
+        if not result["candidates"]:
+            break
+        candidates.extend(result["candidates"])
+        page += 1
+
+    truncated = total_entries > len(candidates)
+    return {"total_entries": total_entries, "candidates": candidates[:max_results], "truncated": truncated}
+
+
 # --------------------------------------------------------------- reveal -----
 
 def reveal_email(apollo_person_id):
