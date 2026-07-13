@@ -1892,28 +1892,32 @@ def _candidate_row_to_dict(row):
     }
 
 
-def _attach_prior_pull_info(conn, candidates, current_batch_id):
-    """Flags candidates whose apollo_person_id already showed up in a
-    different past batch, so the operator can see it's a repeat (and whether
-    it was already pushed) before deciding to keep enriching/pushing it
-    again. Keyed on apollo_person_id, not email -- email isn't known yet at
-    the Scrub stage, before enrichment reveals it.
+RECENT_PULL_WINDOW_DAYS = 182  # ~6 months -- the "don't re-pull the same lead" rule
+
+
+def _get_prior_pull_map(conn, person_ids, exclude_batch_id=None):
+    """For each apollo_person_id, finds its most relevant prior occurrence
+    across all OTHER batches: any pushed occurrence wins (most recent among
+    those), else the most recent occurrence regardless of push status. That
+    ordering means a later, never-pushed batch can't hide an earlier real
+    push (see comment inline).
     """
-    person_ids = [c["apollo_person_id"] for c in candidates if c.get("apollo_person_id")]
     if not person_ids:
-        return candidates
+        return {}
     placeholders = ",".join("?" * len(person_ids))
+    params = list(person_ids)
+    exclude_clause = ""
+    if exclude_batch_id is not None:
+        exclude_clause = "AND pc.batch_id != ?"
+        params.append(exclude_batch_id)
     rows = conn.execute(f"""
         SELECT pc.apollo_person_id, pc.pushed_at, pc.hubspot_contact_id,
                pb.id AS batch_id, pb.search_name, pb.created_at
         FROM pull_candidates pc
         JOIN pull_batches pb ON pb.id = pc.batch_id
-        WHERE pc.apollo_person_id IN ({placeholders}) AND pc.batch_id != ?
+        WHERE pc.apollo_person_id IN ({placeholders}) {exclude_clause}
         ORDER BY (pc.pushed_at IS NULL) ASC, pb.created_at DESC
-    """, person_ids + [current_batch_id]).fetchall()
-    # Ordering puts any pushed occurrence first (most recent among those),
-    # so a later unpushed batch touching the same person can't hide an
-    # earlier real push -- "was this ever pushed" beats "most recent".
+    """, params).fetchall()
 
     prior_by_person = {}
     for r in rows:
@@ -1926,9 +1930,32 @@ def _attach_prior_pull_info(conn, candidates, current_batch_id):
                 "pushed_at": r["pushed_at"],
                 "hubspot_contact_id": r["hubspot_contact_id"],
             }
+    return prior_by_person
 
+
+def _within_recent_pull_window(prior_pull):
+    if not prior_pull:
+        return False
+    reference = prior_pull.get("pushed_at") or prior_pull.get("created_at")
+    if not reference:
+        return False
+    ref_dt = datetime.fromisoformat(reference)
+    return (datetime.now(timezone.utc) - ref_dt) < timedelta(days=RECENT_PULL_WINDOW_DAYS)
+
+
+def _attach_prior_pull_info(conn, candidates, current_batch_id):
+    """Flags candidates whose apollo_person_id already showed up in a
+    different past batch, so the operator can see it's a repeat (and whether
+    it was already pushed) before deciding to keep enriching/pushing it
+    again. Keyed on apollo_person_id, not email -- email isn't known yet at
+    the Scrub stage, before enrichment reveals it.
+    """
+    person_ids = [c["apollo_person_id"] for c in candidates if c.get("apollo_person_id")]
+    prior_by_person = _get_prior_pull_map(conn, person_ids, exclude_batch_id=current_batch_id)
     for c in candidates:
-        c["prior_pull"] = prior_by_person.get(c.get("apollo_person_id"))
+        prior = prior_by_person.get(c.get("apollo_person_id"))
+        c["prior_pull"] = prior
+        c["auto_excluded_recent"] = _within_recent_pull_window(prior)
     return candidates
 
 
@@ -1989,13 +2016,23 @@ def run_pull_search():
             [search_name, json.dumps(criteria), datetime.now(timezone.utc).isoformat(), result["total_entries"]]
         )
         batch_id = cur.lastrowid
+
+        # 6-month no-repeat-pull rule: a candidate already pulled (or pushed)
+        # within the window starts off unchecked on Scrub, so it can't slip
+        # through to a re-push by default. Still visible and toggleable --
+        # this sets the default, it doesn't hard-block the operator.
+        person_ids = [c["apollo_person_id"] for c in result["candidates"]]
+        prior_by_person = _get_prior_pull_map(conn, person_ids)
+
         for c in result["candidates"]:
+            prior = prior_by_person.get(c["apollo_person_id"])
+            default_keep = 0 if _within_recent_pull_window(prior) else 1
             conn.execute("""
                 INSERT INTO pull_candidates
-                    (batch_id, apollo_person_id, first_name, last_name, title, company_name)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (batch_id, apollo_person_id, first_name, last_name, title, company_name, keep)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, [batch_id, c["apollo_person_id"], c["first_name"], c["last_name"],
-                  c["title"], c["company_name"]])
+                  c["title"], c["company_name"], default_keep])
         rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
         candidates = _attach_prior_pull_info(conn, [_candidate_row_to_dict(r) for r in rows], batch_id)
 

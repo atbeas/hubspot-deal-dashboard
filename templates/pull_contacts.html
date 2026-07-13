@@ -205,6 +205,9 @@
         <div class="summary-chip"><b id="totalShown">0</b> pulled in</div>
         <div class="summary-chip"><b id="totalKept">0</b> kept</div>
       </div>
+      <div class="hint" style="margin-bottom:10px">
+        <strong>Rule:</strong> a lead already pulled or pushed within the last 6 months starts unchecked here (see the "Seen before?" column for when) so we don't work the same person twice. You can still manually re-check one if you want to include it anyway.
+      </div>
       <div class="hint" id="scrubTruncatedNote" style="display:none;color:#fbbf24;margin-bottom:10px">
         This search matched more than 1000 people in Apollo — showing the first 1000. Narrow the criteria (titles, keyword, employee range) to capture the rest.
       </div>
@@ -456,10 +459,12 @@ document.getElementById('runSearchBtn').addEventListener('click', async () => {
 function seenBeforeCell(c) {
   if (!c.prior_pull) return '<span class="pill pill-good">new</span>';
   const when = formatTimestamp(c.prior_pull.created_at);
+  const withinWindow = c.auto_excluded_recent;
+  const suffix = withinWindow ? ' — within 6mo' : '';
   if (c.prior_pull.pushed_at) {
-    return `<span class="pill pill-bad" title="Batch: ${esc(c.prior_pull.search_name)}">Pushed ${formatTimestamp(c.prior_pull.pushed_at)}</span>`;
+    return `<span class="pill pill-bad" title="Batch: ${esc(c.prior_pull.search_name)}">Pushed ${formatTimestamp(c.prior_pull.pushed_at)}${suffix}</span>`;
   }
-  return `<span class="pill pill-warn" title="Batch: ${esc(c.prior_pull.search_name)}">Seen ${when}, not pushed</span>`;
+  return `<span class="pill pill-warn" title="Batch: ${esc(c.prior_pull.search_name)}">Seen ${when}, not pushed${suffix}</span>`;
 }
 
 function renderScrubTable() {
