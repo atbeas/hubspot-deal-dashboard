@@ -48,6 +48,10 @@
     }
     .rail-item:hover .del-x { opacity: .7; }
     .rail-item .del-x:hover { opacity: 1; background: rgba(0,0,0,.2); }
+    .rail-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .rail-item-main span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rail-sub { font-size: .68rem; color: #5c607a; font-weight: 500; }
+    .rail-item.active .rail-sub { color: rgba(255,255,255,.75); }
     .rail-new {
       margin-top: 10px; width: 100%; padding: 8px 10px; border-radius: 7px;
       background: rgba(255,255,255,.05); border: 1px dashed #3a3d50; color: #8b8fa8;
@@ -145,6 +149,9 @@
     <div class="rail-title">Saved Searches</div>
     <div id="railList"></div>
     <button class="rail-new" id="newSearchBtn" type="button">+ New search</button>
+
+    <div class="rail-title" style="margin-top:24px">Past Pulls</div>
+    <div id="pastPullsList"></div>
   </div>
 
   <div class="main">
@@ -272,6 +279,7 @@ let currentBatchId = null;
 let currentCandidates = [];
 let savedSearches = [];
 let enrichPollTimer = null;
+const LAST_BATCH_KEY = 'pc_active_batch_id';
 
 function esc(s) { return (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -347,8 +355,56 @@ document.getElementById('newSearchBtn').addEventListener('click', () => {
   document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'));
   document.getElementById('fSearchName').value = '';
   fillCriteriaForm({});
+  currentBatchId = null;
+  currentCandidates = [];
+  localStorage.removeItem(LAST_BATCH_KEY);
   setStage('define');
 });
+
+function stageLabel(stage) {
+  return {scrubbing: 'Scrubbing', enriching: 'Enriching', ready: 'Ready to push', pushed: 'Pushed'}[stage] || stage;
+}
+
+async function loadPastBatches() {
+  const resp = await fetch('/api/pull-contacts/batches');
+  const data = await resp.json();
+  const list = document.getElementById('pastPullsList');
+  list.innerHTML = data.batches.map(b => `
+    <div class="rail-item" data-batch-id="${b.id}" onclick="resumeBatch(${b.id})">
+      <div class="rail-item-main">
+        <span>${esc(b.search_name)}</span>
+        <span class="rail-sub">${stageLabel(b.stage)} · ${b.kept} kept${b.pushed ? ` · ${b.pushed} pushed` : ''}</span>
+      </div>
+    </div>
+  `).join('') || '<div class="empty-hint" style="padding:10px 0">No pulls yet</div>';
+}
+
+async function resumeBatch(id) {
+  const resp = await fetch(`/api/pull-contacts/batches/${id}`);
+  if (!resp.ok) { localStorage.removeItem(LAST_BATCH_KEY); return; }
+  const data = await resp.json();
+  currentBatchId = data.batch_id;
+  currentCandidates = data.candidates;
+  localStorage.setItem(LAST_BATCH_KEY, id);
+
+  document.querySelectorAll('#pastPullsList .rail-item').forEach(el => el.classList.toggle('active', el.dataset.batchId == id));
+  document.querySelectorAll('#railList .rail-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('fSearchName').value = data.search_name || '';
+  fillCriteriaForm(data.criteria || {});
+
+  if (data.stage === 'scrubbing') {
+    document.getElementById('totalFound').textContent = data.total_entries || currentCandidates.length;
+    document.getElementById('totalShown').textContent = currentCandidates.length;
+    document.getElementById('scrubTruncatedNote').style.display = 'none';
+    renderScrubTable();
+    setStage('scrub');
+  } else {
+    renderEnrichTable();
+    setStage('enrich');
+    const stillPending = currentCandidates.some(c => c.keep && (c.enrich_status === 'enriching' || c.mobile_status === 'pending'));
+    if (stillPending) pollEnrichProgress();
+  }
+}
 
 document.getElementById('saveSearchBtn').addEventListener('click', async () => {
   const name = document.getElementById('fSearchName').value.trim();
@@ -371,11 +427,13 @@ document.getElementById('runSearchBtn').addEventListener('click', async () => {
     const data = await resp.json();
     currentBatchId = data.batch_id;
     currentCandidates = data.candidates;
+    localStorage.setItem(LAST_BATCH_KEY, data.batch_id);
     document.getElementById('totalFound').textContent = data.total_entries;
     document.getElementById('totalShown').textContent = data.candidates.length;
     document.getElementById('scrubTruncatedNote').style.display = data.truncated ? '' : 'none';
     renderScrubTable();
     setStage('scrub');
+    loadPastBatches();
   } finally {
     btn.disabled = false; btn.textContent = 'Search Apollo';
   }
@@ -416,6 +474,7 @@ document.getElementById('continueToEnrichBtn').addEventListener('click', async (
     renderEnrichTable();
     setStage('enrich');
     pollEnrichProgress();
+    loadPastBatches();
   } finally {
     btn.disabled = false; btn.textContent = 'Continue to Enrich';
   }
@@ -525,13 +584,22 @@ document.getElementById('pushBtn').addEventListener('click', async () => {
     document.getElementById('pushResult').innerHTML = `
       <div class="result-banner">✓ Pushed ${data.pushed} contact(s) to HubSpot${data.tasks_created ? ` and created ${data.tasks_created} follow-up task(s)` : ''}.</div>
     `;
+    loadPastBatches();
   } finally {
     btn.disabled = false; btn.textContent = 'Push to HubSpot';
   }
 });
 
 loadSavedSearches();
-setStage('define');
+loadPastBatches();
+(async () => {
+  const lastBatchId = localStorage.getItem(LAST_BATCH_KEY);
+  if (lastBatchId) {
+    await resumeBatch(parseInt(lastBatchId));
+  } else {
+    setStage('define');
+  }
+})();
 </script>
 
 </body>

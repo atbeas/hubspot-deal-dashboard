@@ -124,6 +124,10 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+        try:
+            conn.execute("ALTER TABLE pull_batches ADD COLUMN total_entries INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS pull_candidates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1941,8 +1945,8 @@ def run_pull_search():
 
     with get_db() as conn:
         cur = conn.execute(
-            "INSERT INTO pull_batches (search_name, criteria_json, stage, created_at) VALUES (?, ?, 'scrubbing', ?)",
-            [search_name, json.dumps(criteria), datetime.now(timezone.utc).isoformat()]
+            "INSERT INTO pull_batches (search_name, criteria_json, stage, created_at, total_entries) VALUES (?, ?, 'scrubbing', ?, ?)",
+            [search_name, json.dumps(criteria), datetime.now(timezone.utc).isoformat(), result["total_entries"]]
         )
         batch_id = cur.lastrowid
         for c in result["candidates"]:
@@ -1962,6 +1966,35 @@ def run_pull_search():
     })
 
 
+@app.route("/api/pull-contacts/batches")
+@login_required
+def list_pull_batches():
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT b.id, b.search_name, b.stage, b.created_at, b.total_entries,
+                   COUNT(c.id) AS total,
+                   SUM(CASE WHEN c.keep = 1 THEN 1 ELSE 0 END) AS kept,
+                   SUM(CASE WHEN c.pushed_at IS NOT NULL THEN 1 ELSE 0 END) AS pushed
+            FROM pull_batches b
+            LEFT JOIN pull_candidates c ON c.batch_id = b.id
+            GROUP BY b.id
+            ORDER BY b.id DESC
+            LIMIT 25
+        """).fetchall()
+    return jsonify({"batches": [
+        {
+            "id": r["id"],
+            "search_name": r["search_name"] or "Untitled pull",
+            "stage": r["stage"],
+            "created_at": r["created_at"],
+            "total_entries": r["total_entries"] or 0,
+            "total": r["total"] or 0,
+            "kept": r["kept"] or 0,
+            "pushed": r["pushed"] or 0,
+        } for r in rows
+    ]})
+
+
 @app.route("/api/pull-contacts/batches/<int:batch_id>")
 @login_required
 def get_pull_batch(batch_id):
@@ -1973,6 +2006,9 @@ def get_pull_batch(batch_id):
     return jsonify({
         "batch_id": batch_id,
         "stage": batch["stage"],
+        "search_name": batch["search_name"],
+        "criteria": json.loads(batch["criteria_json"]) if batch["criteria_json"] else {},
+        "total_entries": batch["total_entries"] or 0,
         "candidates": [_candidate_row_to_dict(r) for r in rows],
     })
 
