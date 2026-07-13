@@ -54,6 +54,10 @@
     .rail-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .rail-item-main span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .rail-sub { font-size: .68rem; color: #5c607a; font-weight: 500; }
+    .rail-icp {
+      font-style: italic; white-space: normal; line-height: 1.3;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
     .rail-item.active .rail-sub { color: rgba(255,255,255,.75); }
     .rail-new {
       margin-top: 10px; width: 100%; padding: 8px 10px; border-radius: 7px;
@@ -361,6 +365,20 @@ function formatTimestamp(iso) {
   return d.toLocaleString(undefined, {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
 }
 
+function summarizeCriteria(criteria) {
+  if (!criteria) return '';
+  if (criteria.apollo_list_id) return `Apollo list: ${criteria.apollo_list_id}`;
+  const parts = [];
+  if (criteria.locations && criteria.locations.length) parts.push(criteria.locations.join(', '));
+  if (criteria.employee_min != null || criteria.employee_max != null) {
+    parts.push(`${criteria.employee_min ?? '0'}–${criteria.employee_max ?? '∞'} emp`);
+  }
+  if (criteria.titles && criteria.titles.length) parts.push(criteria.titles.join(', '));
+  if (criteria.seniorities && criteria.seniorities.length) parts.push(criteria.seniorities.join(', '));
+  if (criteria.keyword_tags && criteria.keyword_tags.length) parts.push(criteria.keyword_tags.join(', '));
+  return parts.join(' · ') || 'No filters (nationwide)';
+}
+
 async function loadSavedSearches() {
   const resp = await fetch('/api/pull-contacts/searches');
   const data = await resp.json();
@@ -371,6 +389,7 @@ async function loadSavedSearches() {
       <div class="rail-item-main">
         <span>${esc(s.name)}</span>
         <span class="rail-sub">Saved ${formatTimestamp(s.created_at)}</span>
+        <span class="rail-sub rail-icp" title="${esc(summarizeCriteria(s.criteria))}">${esc(summarizeCriteria(s.criteria))}</span>
       </div>
       <span class="del-x" onclick="event.stopPropagation(); deleteSavedSearch(${s.id})">✕</span>
     </div>
@@ -417,6 +436,7 @@ async function loadPastBatches() {
         <span>${esc(b.search_name)}</span>
         <span class="rail-sub">${stageLabel(b.stage)} · ${b.kept} kept${b.pushed ? ` · ${b.pushed} pushed` : ''}</span>
         <span class="rail-sub">${formatTimestamp(b.created_at)}</span>
+        <span class="rail-sub rail-icp" title="${esc(summarizeCriteria(b.criteria))}">${esc(summarizeCriteria(b.criteria))}</span>
       </div>
     </div>
   `).join('') || '<div class="empty-hint" style="padding:10px 0">No pulls yet</div>';

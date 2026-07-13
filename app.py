@@ -2091,7 +2091,7 @@ def run_pull_search():
 def list_pull_batches():
     with get_db() as conn:
         rows = conn.execute("""
-            SELECT b.id, b.search_name, b.stage, b.created_at, b.total_entries,
+            SELECT b.id, b.search_name, b.stage, b.created_at, b.total_entries, b.criteria_json,
                    COUNT(c.id) AS total,
                    SUM(CASE WHEN c.keep = 1 THEN 1 ELSE 0 END) AS kept,
                    SUM(CASE WHEN c.pushed_at IS NOT NULL THEN 1 ELSE 0 END) AS pushed
@@ -2111,6 +2111,7 @@ def list_pull_batches():
             "total": r["total"] or 0,
             "kept": r["kept"] or 0,
             "pushed": r["pushed"] or 0,
+            "criteria": json.loads(r["criteria_json"]) if r["criteria_json"] else {},
         } for r in rows
     ]})
 
