@@ -41,6 +41,10 @@ def init_db():
             conn.execute("ALTER TABLE client_contacts ADD COLUMN meeting_quota INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE client_contacts ADD COLUMN icp_notes TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS owner_eligibility (
                 owner_id TEXT PRIMARY KEY,
@@ -425,12 +429,14 @@ def index():
         data = resp.json()
         client_eligibility = get_client_eligibility()
         client_quotas = get_client_quotas()
+        client_icp_notes = get_client_icp_notes()
         client_options = [
             {
                 "label": o["label"],
                 "value": o["value"],
                 "enabled": client_eligibility.get(o["value"], True),
                 "meeting_quota": client_quotas.get(o["value"], 0),
+                "icp_notes": client_icp_notes.get(o["value"], ""),
             }
             for o in data.get("options", [])
             if not o.get("hidden")
@@ -485,6 +491,12 @@ def get_client_quotas():
     with get_db() as conn:
         rows = conn.execute("SELECT client_value, meeting_quota FROM client_contacts").fetchall()
     return {r["client_value"]: (r["meeting_quota"] or 0) for r in rows}
+
+
+def get_client_icp_notes():
+    with get_db() as conn:
+        rows = conn.execute("SELECT client_value, icp_notes FROM client_contacts").fetchall()
+    return {r["client_value"]: (r["icp_notes"] or "") for r in rows}
 
 
 def get_deal_meetings():
@@ -1072,6 +1084,7 @@ def admin():
         c["name2"]  = saved.get("name2", "")
         c["name3"]  = saved.get("name3", "")
         c["meeting_quota"] = saved.get("meeting_quota") or ""
+        c["icp_notes"] = saved.get("icp_notes", "")
         c["enabled"] = client_eligibility.get(c["value"], True)
 
     owners = fetch_hubspot_owners()
@@ -1472,10 +1485,11 @@ def save_client(client_value):
         meeting_quota = int(body.get("meeting_quota") or 0)
     except (TypeError, ValueError):
         meeting_quota = 0
+    icp_notes = (body.get("icp_notes") or "").strip()
     with get_db() as conn:
         conn.execute("""
-            INSERT INTO client_contacts (client_value, email1, email2, email3, name1, name2, name3, meeting_quota)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO client_contacts (client_value, email1, email2, email3, name1, name2, name3, meeting_quota, icp_notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(client_value) DO UPDATE SET
                 email1 = excluded.email1,
                 email2 = excluded.email2,
@@ -1483,8 +1497,9 @@ def save_client(client_value):
                 name1 = excluded.name1,
                 name2 = excluded.name2,
                 name3 = excluded.name3,
-                meeting_quota = excluded.meeting_quota
-        """, [client_value] + emails + names + [meeting_quota])
+                meeting_quota = excluded.meeting_quota,
+                icp_notes = excluded.icp_notes
+        """, [client_value] + emails + names + [meeting_quota, icp_notes])
     return jsonify({"ok": True})
 
 

@@ -109,6 +109,11 @@
       flex-shrink: 0; min-width: 22px; text-align: center; padding: 2px 7px; border-radius: 20px;
       font-size: .74rem; font-weight: 700; background: rgba(220,38,38,.18); color: #f87171;
     }
+    .client-side-icp {
+      flex-shrink: 1; min-width: 0; max-width: 92px;
+      font-size: .68rem; font-style: italic; color: #6b7280;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     .client-side-chevron {
       flex-shrink: 0; font-size: .65rem; color: #5c607a; transition: transform .15s;
     }
@@ -616,6 +621,7 @@
         label: o.label,
         value: o.value,
         quota: o.meeting_quota || 0,
+        icp: o.icp_notes || '',
         data: clientDealCounts[o.value] || { count: 0, no_show: 0, deals: [] },
       }))
       .sort((a, b) => a.label.localeCompare(b.label));
@@ -636,6 +642,7 @@
             <span class="client-side-quota${r.quota ? '' : ' unset'}" title="Meeting quota">${r.quota || '–'}</span>
             <span class="client-side-count${r.data.count ? '' : ' zero'}">${r.data.count}</span>
             <span class="client-side-count-noshow" title="No-show / declined / canceled (Reschedule Meeting 1)">${r.data.no_show}</span>
+            ${r.icp ? `<span class="client-side-icp" title="${esc(r.icp)}">${esc(r.icp)}</span>` : ''}
             <span class="client-side-chevron">▸</span>
           </div>
           <div class="client-side-detail" id="clientdetail-${esc(r.value)}">

@@ -89,7 +89,7 @@
     }
     .client-row {
       display: grid;
-      grid-template-columns: 200px 80px 1fr 1fr 1fr 90px 70px;
+      grid-template-columns: 200px 80px 170px 1fr 1fr 1fr 90px 70px;
       gap: 12px; align-items: center;
       padding: 12px 20px; border-bottom: 1px solid #f0f0f0;
     }
@@ -131,6 +131,15 @@
     input.quota-input:focus { border-color: #ff5c35; }
     input.quota-input.dirty { border-color: #fcd34d; background: #fffbeb; }
     input.quota-input.saved { border-color: #6ee7b7; background: #f0fdf4; }
+
+    input.icp-input {
+      width: 100%; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px;
+      font-size: .8rem; font-family: inherit; color: #1a1a2e; outline: none;
+      transition: border-color .2s;
+    }
+    input.icp-input:focus { border-color: #ff5c35; }
+    input.icp-input.dirty { border-color: #fcd34d; background: #fffbeb; }
+    input.icp-input.saved { border-color: #6ee7b7; background: #f0fdf4; }
 
     .btn-save {
       padding: 7px 14px; border-radius: 6px; font-size: .82rem; font-weight: 600;
@@ -293,6 +302,7 @@
     <div class="client-row header-row">
       <div>Client</div>
       <div>Quota</div>
+      <div>ICP (Size/Geo/Ind)</div>
       <div>Contact 1</div>
       <div>Contact 2</div>
       <div>Contact 3</div>
@@ -305,6 +315,10 @@
       <div>
         <input class="quota-input" type="number" min="0" placeholder="0"
                value="{{ c.meeting_quota }}" oninput="markDirty(this, '{{ c.value }}')" />
+      </div>
+      <div>
+        <input class="icp-input" type="text" placeholder="e.g. 20-200 emp / TX / MSP"
+               value="{{ c.icp_notes }}" oninput="markDirty(this, '{{ c.value }}')" />
       </div>
       <div class="contact-cell">
         <input class="name-input" type="text" placeholder="Name"
@@ -466,11 +480,13 @@
     const emailInputs = row.querySelectorAll('input.email-input');
     const nameInputs = row.querySelectorAll('input.name-input');
     const quotaInput = row.querySelector('input.quota-input');
+    const icpInput = row.querySelector('input.icp-input');
     const payload = {};
     emailInputs.forEach((inp, i) => { payload[`email${i + 1}`] = inp.value.trim(); });
     nameInputs.forEach((inp, i) => { payload[`name${i + 1}`] = inp.value.trim(); });
     payload.meeting_quota = quotaInput.value.trim();
-    const inputs = [...emailInputs, ...nameInputs, quotaInput];
+    payload.icp_notes = icpInput.value.trim();
+    const inputs = [...emailInputs, ...nameInputs, quotaInput, icpInput];
 
     btn.disabled = true;
     btn.textContent = 'Saving…';
