@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pull Contact Data — Deal Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #0f1117; color: #e8e9f0; min-height: 100vh; }
+
+    header {
+      background: #0d0e1a; color: #e8e9f0;
+      padding: 16px 32px; display: flex; align-items: center; gap: 14px;
+      border-bottom: 1px solid #2a2d3e; box-shadow: 0 2px 12px rgba(0,0,0,.4);
+    }
+    header h1 { font-size: 1.15rem; font-weight: 700; }
+    header p { font-size: .82rem; color: #8b8fa8; margin-top: 2px; }
+    .header-nav { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+    .nav-link {
+      padding: 7px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600;
+      text-decoration: none; color: #c9cad8; background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1); transition: background .15s;
+    }
+    .nav-link:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
+    .nav-link.active { background: #ff5c35; color: #fff; border-color: #ff5c35; }
+
+    .layout { display: flex; align-items: flex-start; gap: 0; }
+
+    /* ── Left nav: saved searches ── */
+    .search-rail {
+      width: 220px; flex-shrink: 0; background: #14151f; border-right: 1px solid #2a2d3e;
+      min-height: calc(100vh - 68px); padding: 20px 14px;
+    }
+    .rail-title {
+      font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+      color: #8b8fa8; padding: 0 8px 10px;
+    }
+    .rail-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 6px;
+      padding: 9px 10px; border-radius: 7px; font-size: .87rem; color: #c9cad8;
+      cursor: pointer; margin-bottom: 2px; transition: background .12s;
+    }
+    .rail-item:hover { background: rgba(255,255,255,.06); }
+    .rail-item.active { background: #ff5c35; color: #fff; font-weight: 600; }
+    .rail-item .del-x {
+      opacity: 0; font-size: .75rem; color: #f87171; padding: 2px 4px; border-radius: 4px;
+    }
+    .rail-item:hover .del-x { opacity: .7; }
+    .rail-item .del-x:hover { opacity: 1; background: rgba(0,0,0,.2); }
+    .rail-new {
+      margin-top: 10px; width: 100%; padding: 8px 10px; border-radius: 7px;
+      background: rgba(255,255,255,.05); border: 1px dashed #3a3d50; color: #8b8fa8;
+      font-size: .82rem; cursor: pointer; text-align: left;
+    }
+    .rail-new:hover { color: #e8e9f0; border-color: #5c607a; }
+
+    /* ── Main content ── */
+    .main { flex: 1; min-width: 0; padding: 28px 36px 60px; max-width: 1180px; }
+    .stage-heading { font-size: 1.02rem; font-weight: 700; margin-bottom: 4px; }
+    .stage-sub { font-size: .84rem; color: #8b8fa8; margin-bottom: 18px; }
+
+    .panel {
+      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 12px;
+      padding: 20px 22px; margin-bottom: 20px;
+    }
+    .panel-title { font-size: .88rem; font-weight: 700; margin-bottom: 14px; color: #e8e9f0; }
+
+    .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+    .field label {
+      display: block; font-size: .73rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .4px; color: #8b8fa8; margin-bottom: 6px;
+    }
+    .field input[type="text"], .field input[type="number"], .field select, .field input[type="datetime-local"] {
+      width: 100%; border: 1px solid #2a2d3e; border-radius: 6px; padding: 8px 11px;
+      font-size: .88rem; font-family: inherit; color: #e8e9f0; background: #14151f; outline: none;
+    }
+    .field input:focus, .field select:focus { border-color: #ff5c35; }
+    .field .hint { font-size: .72rem; color: #5c607a; margin-top: 4px; }
+    .range-row { display: flex; gap: 8px; align-items: center; }
+
+    .btn { padding: 9px 20px; border-radius: 6px; font-size: .87rem; font-weight: 600; cursor: pointer; border: none; transition: background .15s; }
+    .btn-primary { background: #ff5c35; color: #fff; }
+    .btn-primary:hover { background: #e04d2a; }
+    .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-ghost { background: rgba(255,255,255,.06); color: #c9cad8; border: 1px solid #2a2d3e; }
+    .btn-ghost:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
+    .btn-row { display: flex; gap: 10px; margin-top: 18px; align-items: center; }
+
+    .summary-strip { display: flex; gap: 18px; margin-bottom: 14px; flex-wrap: wrap; }
+    .summary-chip { background: #14151f; border: 1px solid #2a2d3e; border-radius: 8px; padding: 8px 14px; font-size: .82rem; }
+    .summary-chip b { color: #22c55e; }
+
+    table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .4px; color: #8b8fa8; padding: 8px 10px; border-bottom: 1px solid #2a2d3e; }
+    td { padding: 8px 10px; border-bottom: 1px solid #22243a; color: #c9cad8; vertical-align: middle; }
+    tr.removed td { opacity: .35; text-decoration: line-through; }
+    .table-wrap { max-height: 480px; overflow-y: auto; overflow-x: auto; border: 1px solid #2a2d3e; border-radius: 8px; }
+
+    .pill { display: inline-block; font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; letter-spacing: .2px; }
+    .pill-good { background: rgba(34,197,94,.15); color: #4ade80; }
+    .pill-warn { background: rgba(251,191,36,.15); color: #fbbf24; }
+    .pill-bad  { background: rgba(248,113,113,.15); color: #f87171; }
+    .pill-pending { background: rgba(139,143,168,.15); color: #8b8fa8; }
+
+    .stepper { display: flex; gap: 8px; margin-bottom: 22px; }
+    .step-pill {
+      font-size: .74rem; font-weight: 700; padding: 5px 12px; border-radius: 20px;
+      background: rgba(255,255,255,.06); color: #5c607a; letter-spacing: .3px;
+    }
+    .step-pill.current { background: #ff5c35; color: #fff; }
+    .step-pill.done { background: rgba(34,197,94,.15); color: #4ade80; }
+
+    .empty-hint { color: #5c607a; font-size: .85rem; padding: 30px 0; text-align: center; }
+    .toggle-row { display: flex; align-items: center; gap: 8px; font-size: .84rem; color: #c9cad8; }
+
+    .result-banner {
+      background: rgba(34,197,94,.1); border: 1px solid rgba(34,197,94,.3); border-radius: 8px;
+      padding: 14px 18px; font-size: .88rem; color: #4ade80; margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="rgba(255,255,255,.2)"/>
+    <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>Pull Contact Data</h1>
+    <p>Define an ICP, pull fresh leads from Apollo, and push them to HubSpot — all from one screen</p>
+  </div>
+  <div class="header-nav">
+    <a href="/" class="nav-link">← Dashboard</a>
+    <a href="/hs-workflows" class="nav-link">HS Workflows</a>
+    <a href="/admin" class="nav-link">Admin</a>
+    <a href="/settings" class="nav-link">Settings</a>
+    <a href="/logout" class="nav-link">Log Out</a>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="search-rail">
+    <div class="rail-title">Saved Searches</div>
+    <div id="railList"></div>
+    <button class="rail-new" id="newSearchBtn" type="button">+ New search</button>
+  </div>
+
+  <div class="main">
+    <div class="stepper" id="stepper"></div>
+
+    <!-- Stage 1: Define ICP -->
+    <div class="panel" id="panelDefine">
+      <div class="panel-title">① Define ICP</div>
+      <div class="field-grid">
+        <div class="field">
+          <label>Search name</label>
+          <input type="text" id="fSearchName" placeholder="e.g. MSPs" />
+        </div>
+        <div class="field">
+          <label>Geography (company HQ)</label>
+          <input type="text" id="fLocations" placeholder="e.g. Texas, US (comma-separated, blank = nationwide)" />
+        </div>
+        <div class="field">
+          <label>Company size (employees)</label>
+          <div class="range-row">
+            <input type="number" id="fEmpMin" placeholder="Min" />
+            <span style="color:#5c607a">–</span>
+            <input type="number" id="fEmpMax" placeholder="Max" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Titles</label>
+          <input type="text" id="fTitles" placeholder="e.g. Owner, President, CEO" />
+        </div>
+        <div class="field">
+          <label>Seniority (optional, in addition to titles)</label>
+          <input type="text" id="fSeniorities" placeholder="e.g. owner, founder, c_suite" />
+        </div>
+        <div class="field">
+          <label>Industry / vertical keyword</label>
+          <input type="text" id="fKeywords" placeholder="e.g. managed service provider" />
+          <div class="hint">Matched against Apollo's company keyword tags — this is the main industry filter.</div>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="runSearchBtn" type="button">Search Apollo</button>
+        <button class="btn btn-ghost" id="saveSearchBtn" type="button">Save as new search</button>
+      </div>
+    </div>
+
+    <!-- Stage 2: Scrub -->
+    <div class="panel" id="panelScrub" style="display:none">
+      <div class="panel-title">② Scrub results</div>
+      <div class="summary-strip">
+        <div class="summary-chip"><b id="totalFound">0</b> matched in Apollo</div>
+        <div class="summary-chip"><b id="totalShown">0</b> shown this page</div>
+        <div class="summary-chip"><b id="totalKept">0</b> kept</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:30px"></th><th>Name</th><th>Title</th><th>Company</th><th>Email on file</th><th>Direct phone on file</th></tr></thead>
+          <tbody id="scrubBody"></tbody>
+        </table>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="continueToEnrichBtn" type="button">Continue to Enrich</button>
+      </div>
+    </div>
+
+    <!-- Stage 3: Enrich -->
+    <div class="panel" id="panelEnrich" style="display:none">
+      <div class="panel-title">③ Enrich &amp; check completeness</div>
+      <div class="summary-strip">
+        <div class="summary-chip"><b id="enrichDone">0</b> / <span id="enrichTotal">0</span> mobile lookups resolved</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:30px"></th><th>Name</th><th>Company</th><th>Email</th><th>Mobile</th><th>Company Phone</th><th>LinkedIn</th><th>Industry</th></tr></thead>
+          <tbody id="enrichBody"></tbody>
+        </table>
+      </div>
+      <div class="btn-row" style="flex-wrap:wrap">
+        <label class="toggle-row"><input type="checkbox" id="reqEmail" checked /> Require email</label>
+        <label class="toggle-row"><input type="checkbox" id="reqMobile" /> Require mobile</label>
+        <label class="toggle-row"><input type="checkbox" id="reqLinkedin" /> Require LinkedIn</label>
+        <button class="btn btn-ghost" id="applyFilterBtn" type="button">Exclude incomplete</button>
+        <button class="btn btn-primary" id="continueToPushBtn" type="button" style="margin-left:auto">Continue to Tag &amp; Push</button>
+      </div>
+    </div>
+
+    <!-- Stage 4: Push -->
+    <div class="panel" id="panelPush" style="display:none">
+      <div class="panel-title">④ Tag &amp; push to HubSpot</div>
+      <div class="field-grid">
+        <div class="field">
+          <label>Sales-Client Focus</label>
+          <select id="fSalesFocus"></select>
+        </div>
+        <div class="field">
+          <label>Lead Source</label>
+          <select id="fLeadSource"></select>
+        </div>
+        <div class="field">
+          <label>Contact Owner</label>
+          <select id="fOwner"></select>
+        </div>
+        <div class="field">
+          <label>Follow-up call tasks</label>
+          <div class="toggle-row" style="margin-top:8px">
+            <input type="checkbox" id="fCreateTasks" checked />
+            <span>Create "MSP | {State} | Task 1" call task per contact, due:</span>
+          </div>
+          <input type="datetime-local" id="fTaskDue" style="margin-top:8px" />
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="pushBtn" type="button">Push to HubSpot</button>
+      </div>
+      <div id="pushResult"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let currentBatchId = null;
+let currentCandidates = [];
+let savedSearches = [];
+let enrichPollTimer = null;
+
+function esc(s) { return (s ?? '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function setStage(stage) {
+  const stages = ['define', 'scrub', 'enrich', 'push'];
+  document.getElementById('panelDefine').style.display = stage === 'define' ? '' : 'none';
+  document.getElementById('panelScrub').style.display = stage === 'scrub' ? '' : 'none';
+  document.getElementById('panelEnrich').style.display = stage === 'enrich' ? '' : 'none';
+  document.getElementById('panelPush').style.display = stage === 'push' ? '' : 'none';
+  document.getElementById('stepper').innerHTML = stages.map((s, i) => {
+    const idx = stages.indexOf(stage);
+    const cls = i < idx ? 'done' : (i === idx ? 'current' : '');
+    const labels = {define: '① Define ICP', scrub: '② Scrub', enrich: '③ Enrich', push: '④ Tag & Push'};
+    return `<span class="step-pill ${cls}">${labels[s]}</span>`;
+  }).join('');
+}
+
+function csvToList(id) {
+  return document.getElementById(id).value.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function collectCriteria() {
+  const empMin = document.getElementById('fEmpMin').value;
+  const empMax = document.getElementById('fEmpMax').value;
+  return {
+    locations: csvToList('fLocations'),
+    employee_min: empMin ? parseInt(empMin) : null,
+    employee_max: empMax ? parseInt(empMax) : null,
+    titles: csvToList('fTitles'),
+    seniorities: csvToList('fSeniorities'),
+    keyword_tags: csvToList('fKeywords'),
+  };
+}
+
+function fillCriteriaForm(criteria) {
+  document.getElementById('fLocations').value = (criteria.locations || []).join(', ');
+  document.getElementById('fEmpMin').value = criteria.employee_min ?? '';
+  document.getElementById('fEmpMax').value = criteria.employee_max ?? '';
+  document.getElementById('fTitles').value = (criteria.titles || []).join(', ');
+  document.getElementById('fSeniorities').value = (criteria.seniorities || []).join(', ');
+  document.getElementById('fKeywords').value = (criteria.keyword_tags || []).join(', ');
+}
+
+async function loadSavedSearches() {
+  const resp = await fetch('/api/pull-contacts/searches');
+  const data = await resp.json();
+  savedSearches = data.searches;
+  const rail = document.getElementById('railList');
+  rail.innerHTML = savedSearches.map(s => `
+    <div class="rail-item" data-id="${s.id}" onclick="selectSavedSearch(${s.id})">
+      <span>${esc(s.name)}</span>
+      <span class="del-x" onclick="event.stopPropagation(); deleteSavedSearch(${s.id})">✕</span>
+    </div>
+  `).join('') || '<div class="empty-hint" style="padding:10px 0">No saved searches yet</div>';
+}
+
+function selectSavedSearch(id) {
+  const s = savedSearches.find(x => x.id === id);
+  if (!s) return;
+  document.querySelectorAll('.rail-item').forEach(el => el.classList.toggle('active', el.dataset.id == id));
+  document.getElementById('fSearchName').value = s.name;
+  fillCriteriaForm(s.criteria);
+  setStage('define');
+}
+
+async function deleteSavedSearch(id) {
+  if (!confirm('Delete this saved search?')) return;
+  await fetch(`/api/pull-contacts/searches/${id}`, {method: 'DELETE'});
+  loadSavedSearches();
+}
+
+document.getElementById('newSearchBtn').addEventListener('click', () => {
+  document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('fSearchName').value = '';
+  fillCriteriaForm({});
+  setStage('define');
+});
+
+document.getElementById('saveSearchBtn').addEventListener('click', async () => {
+  const name = document.getElementById('fSearchName').value.trim();
+  if (!name) { alert('Give this search a name first.'); return; }
+  await fetch('/api/pull-contacts/searches', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, criteria: collectCriteria()})
+  });
+  loadSavedSearches();
+});
+
+document.getElementById('runSearchBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('runSearchBtn');
+  btn.disabled = true; btn.textContent = 'Searching…';
+  try {
+    const resp = await fetch('/api/pull-contacts/run', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({criteria: collectCriteria(), search_name: document.getElementById('fSearchName').value.trim()})
+    });
+    const data = await resp.json();
+    currentBatchId = data.batch_id;
+    currentCandidates = data.candidates;
+    document.getElementById('totalFound').textContent = data.total_entries;
+    document.getElementById('totalShown').textContent = data.candidates.length;
+    renderScrubTable();
+    setStage('scrub');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Search Apollo';
+  }
+});
+
+function renderScrubTable() {
+  const kept = currentCandidates.filter(c => c.keep).length;
+  document.getElementById('totalKept').textContent = kept;
+  document.getElementById('scrubBody').innerHTML = currentCandidates.map(c => `
+    <tr class="${c.keep ? '' : 'removed'}">
+      <td><input type="checkbox" ${c.keep ? 'checked' : ''} onchange="toggleCandidate(${c.id}, this.checked)" /></td>
+      <td>${esc(c.first_name)} ${esc(c.last_name)}</td>
+      <td>${esc(c.title)}</td>
+      <td>${esc(c.company_name)}</td>
+      <td>${c.has_email !== false ? '<span class="pill pill-good">has email</span>' : '<span class="pill pill-bad">none</span>'}</td>
+      <td>${c.has_direct_phone ? '<span class="pill pill-good">has phone</span>' : '<span class="pill pill-warn">none</span>'}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="empty-hint">No results — try widening your criteria</td></tr>';
+}
+
+function toggleCandidate(id, keep) {
+  const c = currentCandidates.find(c => c.id === id);
+  if (c) c.keep = keep;
+  fetch(`/api/pull-contacts/batches/${currentBatchId}/toggle`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({candidate_ids: [id], keep})
+  });
+  renderScrubTable();
+}
+
+document.getElementById('continueToEnrichBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('continueToEnrichBtn');
+  btn.disabled = true; btn.textContent = 'Enriching…';
+  try {
+    const resp = await fetch(`/api/pull-contacts/batches/${currentBatchId}/enrich`, {method: 'POST'});
+    const data = await resp.json();
+    currentCandidates = data.candidates;
+    renderEnrichTable();
+    setStage('enrich');
+    pollEnrichProgress();
+  } finally {
+    btn.disabled = false; btn.textContent = 'Continue to Enrich';
+  }
+});
+
+function renderEnrichTable() {
+  const kept = currentCandidates.filter(c => c.keep);
+  document.getElementById('enrichTotal').textContent = kept.length;
+  document.getElementById('enrichDone').textContent = kept.filter(c => c.mobile_status !== 'pending').length;
+  document.getElementById('enrichBody').innerHTML = kept.map(c => {
+    let mobilePill = '<span class="pill pill-pending">pending…</span>';
+    if (c.mobile_status === 'found') mobilePill = `<span class="pill pill-good">${esc(c.mobile_phone)}</span>`;
+    if (c.mobile_status === 'not_found') mobilePill = '<span class="pill pill-bad">not found</span>';
+    return `
+      <tr>
+        <td><input type="checkbox" checked onchange="toggleCandidate(${c.id}, this.checked)" /></td>
+        <td>${esc(c.first_name)} ${esc(c.last_name)}</td>
+        <td>${esc(c.company_name)}</td>
+        <td>${c.email ? esc(c.email) : '<span class="pill pill-bad">none</span>'}</td>
+        <td>${mobilePill}</td>
+        <td>${esc(c.company_phone) || '—'}</td>
+        <td>${c.linkedin_url ? '<span class="pill pill-good">yes</span>' : '<span class="pill pill-bad">no</span>'}</td>
+        <td>${esc(c.industry) || '—'}</td>
+      </tr>`;
+  }).join('') || '<tr><td colspan="8" class="empty-hint">Nothing kept from the scrub step</td></tr>';
+}
+
+function pollEnrichProgress() {
+  clearInterval(enrichPollTimer);
+  enrichPollTimer = setInterval(async () => {
+    const resp = await fetch(`/api/pull-contacts/batches/${currentBatchId}`);
+    const data = await resp.json();
+    currentCandidates = data.candidates;
+    renderEnrichTable();
+    const stillPending = currentCandidates.some(c => c.keep && c.mobile_status === 'pending');
+    if (!stillPending) clearInterval(enrichPollTimer);
+  }, 4000);
+}
+
+document.getElementById('applyFilterBtn').addEventListener('click', async () => {
+  const require = [];
+  if (document.getElementById('reqEmail').checked) require.push('email');
+  if (document.getElementById('reqMobile').checked) require.push('mobile_phone');
+  if (document.getElementById('reqLinkedin').checked) require.push('linkedin_url');
+  const resp = await fetch(`/api/pull-contacts/batches/${currentBatchId}/filter-incomplete`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({require})
+  });
+  const data = await resp.json();
+  currentCandidates = data.candidates;
+  renderEnrichTable();
+});
+
+async function loadHubspotOptions() {
+  const resp = await fetch('/api/pull-contacts/hubspot-options');
+  const data = await resp.json();
+  const focusSel = document.getElementById('fSalesFocus');
+  focusSel.innerHTML = data.sales_focus.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+  const sourceSel = document.getElementById('fLeadSource');
+  sourceSel.innerHTML = data.lead_source.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+}
+
+async function loadOwners() {
+  const resp = await fetch('/api/owners');
+  const data = await resp.json();
+  document.getElementById('fOwner').innerHTML = data.owners.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
+}
+
+document.getElementById('continueToPushBtn').addEventListener('click', async () => {
+  setStage('push');
+  if (!document.getElementById('fSalesFocus').options.length) await loadHubspotOptions();
+  if (!document.getElementById('fOwner').options.length) await loadOwners();
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  document.getElementById('fTaskDue').value = now.toISOString().slice(0, 16);
+});
+
+document.getElementById('pushBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('pushBtn');
+  btn.disabled = true; btn.textContent = 'Pushing…';
+  try {
+    const dueLocal = document.getElementById('fTaskDue').value;
+    const resp = await fetch(`/api/pull-contacts/batches/${currentBatchId}/push`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        sales_focus: document.getElementById('fSalesFocus').value,
+        lead_source: document.getElementById('fLeadSource').value,
+        owner_id: document.getElementById('fOwner').value,
+        create_tasks: document.getElementById('fCreateTasks').checked,
+        task_due_iso: dueLocal ? new Date(dueLocal).toISOString() : null,
+      })
+    });
+    const data = await resp.json();
+    document.getElementById('pushResult').innerHTML = `
+      <div class="result-banner">✓ Pushed ${data.pushed} contact(s) to HubSpot${data.tasks_created ? ` and created ${data.tasks_created} follow-up task(s)` : ''}.</div>
+    `;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Push to HubSpot';
+  }
+});
+
+loadSavedSearches();
+setStage('define');
+</script>
+
+</body>
+</html>

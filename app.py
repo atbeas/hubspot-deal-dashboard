@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import secrets
 import requests
@@ -8,6 +9,7 @@ from flask import Flask, jsonify, render_template, request, session, redirect, u
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from werkzeug.security import generate_password_hash, check_password_hash
+import apollo_pipeline as apollo
 
 PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -104,6 +106,68 @@ def init_db():
                 enabled INTEGER DEFAULT 1
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS saved_searches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                criteria_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pull_batches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                search_name TEXT,
+                criteria_json TEXT,
+                stage TEXT NOT NULL DEFAULT 'scrubbing',
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pull_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_id INTEGER NOT NULL,
+                apollo_person_id TEXT NOT NULL,
+                apollo_contact_id TEXT,
+                organization_id TEXT,
+                first_name TEXT DEFAULT '',
+                last_name TEXT DEFAULT '',
+                title TEXT DEFAULT '',
+                company_name TEXT DEFAULT '',
+                keep INTEGER NOT NULL DEFAULT 1,
+                enrich_status TEXT NOT NULL DEFAULT 'pending',
+                email TEXT DEFAULT '',
+                email_status TEXT DEFAULT '',
+                linkedin_url TEXT DEFAULT '',
+                mobile_phone TEXT DEFAULT '',
+                mobile_status TEXT NOT NULL DEFAULT 'pending',
+                company_phone TEXT DEFAULT '',
+                website TEXT DEFAULT '',
+                company_linkedin_url TEXT DEFAULT '',
+                company_address TEXT DEFAULT '',
+                state TEXT DEFAULT '',
+                city TEXT DEFAULT '',
+                employees INTEGER,
+                annual_revenue REAL,
+                industry TEXT DEFAULT '',
+                time_zone TEXT DEFAULT '',
+                hubspot_contact_id TEXT,
+                pushed_at TEXT
+            )
+        """)
+        existing = conn.execute("SELECT COUNT(*) c FROM saved_searches").fetchone()["c"]
+        if existing == 0:
+            conn.execute(
+                "INSERT INTO saved_searches (name, criteria_json, created_at) VALUES (?, ?, ?)",
+                ["MSPs", json.dumps({
+                    "locations": [],
+                    "employee_min": 1,
+                    "employee_max": 50,
+                    "titles": ["Owner", "President", "CEO"],
+                    "seniorities": [],
+                    "keyword_tags": ["managed service provider"],
+                }), datetime.now(timezone.utc).isoformat()]
+            )
 
 init_db()
 
@@ -1756,6 +1820,332 @@ def api_hs_workflows():
     _HS_WORKFLOWS_CACHE["data"] = payload
     _HS_WORKFLOWS_CACHE["ts"] = now_ts
     return jsonify(payload)
+
+
+# ============================================================================
+# Pull Contact Data — Apollo ICP search -> enrich -> push to HubSpot
+# ============================================================================
+
+APOLLO_WEBHOOK_SECRET = os.environ.get("APOLLO_WEBHOOK_SECRET", secrets.token_hex(16))
+# Hardcoded rather than read from RAILWAY_PUBLIC_DOMAIN -- that env var can
+# report one of this service's other custom domains (e.g. zap.runwayselling.app)
+# depending on deploy order, which would be a confusing thing to see in a
+# webhook URL even though it would still work (same app, any hostname).
+PULL_CONTACTS_HOST = os.environ.get("PULL_CONTACTS_HOST", "https://dealallocation.runwayselling.app")
+
+_HUBSPOT_OPTIONS_CACHE = {"data": None, "ts": 0}
+_HUBSPOT_OPTIONS_CACHE_TTL = 3600
+
+
+@app.route("/api/pull-contacts/hubspot-options")
+@login_required
+def pull_contacts_hubspot_options():
+    now_ts = datetime.now(timezone.utc).timestamp()
+    if _HUBSPOT_OPTIONS_CACHE["data"] and (now_ts - _HUBSPOT_OPTIONS_CACHE["ts"] < _HUBSPOT_OPTIONS_CACHE_TTL):
+        return jsonify(_HUBSPOT_OPTIONS_CACHE["data"])
+
+    result = {}
+    for prop in ("sales_focus", "lead_source"):
+        resp = requests.get(f"{BASE_URL}/crm/v3/properties/contacts/{prop}", headers=HEADERS)
+        options = resp.json().get("options", []) if resp.ok else []
+        result[prop] = [{"label": o["label"], "value": o["value"]} for o in options]
+
+    _HUBSPOT_OPTIONS_CACHE["data"] = result
+    _HUBSPOT_OPTIONS_CACHE["ts"] = now_ts
+    return jsonify(result)
+
+
+def _candidate_row_to_dict(row):
+    return {
+        "id": row["id"],
+        "apollo_person_id": row["apollo_person_id"],
+        "apollo_contact_id": row["apollo_contact_id"],
+        "organization_id": row["organization_id"],
+        "first_name": row["first_name"],
+        "last_name": row["last_name"],
+        "title": row["title"],
+        "company_name": row["company_name"],
+        "keep": bool(row["keep"]),
+        "enrich_status": row["enrich_status"],
+        "email": row["email"],
+        "email_status": row["email_status"],
+        "linkedin_url": row["linkedin_url"],
+        "mobile_phone": row["mobile_phone"],
+        "mobile_status": row["mobile_status"],
+        "company_phone": row["company_phone"],
+        "website": row["website"],
+        "company_linkedin_url": row["company_linkedin_url"],
+        "company_address": row["company_address"],
+        "state": row["state"],
+        "city": row["city"],
+        "employees": row["employees"],
+        "annual_revenue": row["annual_revenue"],
+        "industry": row["industry"],
+        "time_zone": row["time_zone"],
+        "hubspot_contact_id": row["hubspot_contact_id"],
+        "pushed_at": row["pushed_at"],
+    }
+
+
+@app.route("/pull-contacts")
+@login_required
+def pull_contacts_page():
+    return render_template("pull_contacts.html")
+
+
+@app.route("/api/pull-contacts/searches")
+@login_required
+def list_saved_searches():
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM saved_searches ORDER BY name").fetchall()
+    return jsonify({"searches": [
+        {"id": r["id"], "name": r["name"], "criteria": json.loads(r["criteria_json"])}
+        for r in rows
+    ]})
+
+
+@app.route("/api/pull-contacts/searches", methods=["POST"])
+@login_required
+def save_search():
+    body = request.get_json()
+    name = (body.get("name") or "").strip()
+    criteria = body.get("criteria") or {}
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO saved_searches (name, criteria_json, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET criteria_json = excluded.criteria_json
+        """, [name, json.dumps(criteria), datetime.now(timezone.utc).isoformat()])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/pull-contacts/searches/<int:search_id>", methods=["DELETE"])
+@login_required
+def delete_saved_search(search_id):
+    with get_db() as conn:
+        conn.execute("DELETE FROM saved_searches WHERE id = ?", [search_id])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/pull-contacts/run", methods=["POST"])
+@login_required
+def run_pull_search():
+    body = request.get_json()
+    criteria = body.get("criteria") or {}
+    search_name = body.get("search_name", "")
+
+    result = apollo.search_apollo(criteria, page=body.get("page", 1), per_page=body.get("per_page", 25))
+
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO pull_batches (search_name, criteria_json, stage, created_at) VALUES (?, ?, 'scrubbing', ?)",
+            [search_name, json.dumps(criteria), datetime.now(timezone.utc).isoformat()]
+        )
+        batch_id = cur.lastrowid
+        for c in result["candidates"]:
+            conn.execute("""
+                INSERT INTO pull_candidates
+                    (batch_id, apollo_person_id, first_name, last_name, title, company_name)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, [batch_id, c["apollo_person_id"], c["first_name"], c["last_name"],
+                  c["title"], c["company_name"]])
+        rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
+
+    return jsonify({
+        "batch_id": batch_id,
+        "total_entries": result["total_entries"],
+        "candidates": [_candidate_row_to_dict(r) for r in rows],
+    })
+
+
+@app.route("/api/pull-contacts/batches/<int:batch_id>")
+@login_required
+def get_pull_batch(batch_id):
+    with get_db() as conn:
+        batch = conn.execute("SELECT * FROM pull_batches WHERE id = ?", [batch_id]).fetchone()
+        if not batch:
+            return jsonify({"error": "not found"}), 404
+        rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
+    return jsonify({
+        "batch_id": batch_id,
+        "stage": batch["stage"],
+        "candidates": [_candidate_row_to_dict(r) for r in rows],
+    })
+
+
+@app.route("/api/pull-contacts/batches/<int:batch_id>/toggle", methods=["POST"])
+@login_required
+def toggle_pull_candidates(batch_id):
+    body = request.get_json()
+    candidate_ids = body.get("candidate_ids") or []
+    keep = 1 if body.get("keep") else 0
+    with get_db() as conn:
+        conn.executemany(
+            "UPDATE pull_candidates SET keep = ? WHERE id = ? AND batch_id = ?",
+            [(keep, cid, batch_id) for cid in candidate_ids]
+        )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/pull-contacts/batches/<int:batch_id>/enrich", methods=["POST"])
+@login_required
+def enrich_pull_batch(batch_id):
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM pull_candidates WHERE batch_id = ? AND keep = 1", [batch_id]
+        ).fetchall()
+
+        webhook_url = f"{PULL_CONTACTS_HOST}/api/pull-contacts/apollo-webhook?key={APOLLO_WEBHOOK_SECRET}"
+
+        # Step 1: reveal email + core profile for each candidate (synchronous)
+        org_ids_needed = set()
+        for r in rows:
+            try:
+                revealed = apollo.reveal_email(r["apollo_person_id"])
+            except requests.RequestException:
+                conn.execute("UPDATE pull_candidates SET enrich_status = 'failed' WHERE id = ?", [r["id"]])
+                continue
+            conn.execute("""
+                UPDATE pull_candidates SET
+                    email = ?, email_status = ?, linkedin_url = ?, apollo_contact_id = ?,
+                    organization_id = ?, time_zone = ?, first_name = ?, last_name = ?,
+                    enrich_status = 'enriching'
+                WHERE id = ?
+            """, [revealed["email"], revealed["email_status"], revealed["linkedin_url"],
+                  revealed["apollo_contact_id"], revealed["organization_id"], revealed["time_zone"],
+                  revealed["first_name"] or r["first_name"], revealed["last_name"] or r["last_name"],
+                  r["id"]])
+            if revealed["organization_id"]:
+                org_ids_needed.add(revealed["organization_id"])
+
+            # Step 2: submit async mobile phone reveal (fire and forget --
+            # the webhook route below fills in the result as it arrives)
+            try:
+                apollo.submit_phone_reveal(r["apollo_person_id"], webhook_url)
+            except requests.RequestException:
+                pass
+
+        # Step 3: company enrichment, one call per org (bulk_enrich needs a
+        # domain we don't have yet at this point, so use the per-id lookup)
+        for org_id in org_ids_needed:
+            org = apollo.enrich_org_by_id(org_id)
+            if not org:
+                continue
+            conn.execute("""
+                UPDATE pull_candidates SET
+                    company_phone = ?, website = ?, company_linkedin_url = ?,
+                    company_address = ?, state = ?, city = ?, employees = ?,
+                    annual_revenue = ?, industry = ?
+                WHERE batch_id = ? AND organization_id = ?
+            """, [org.get("sanitized_phone", ""), org.get("website_url", ""),
+                  org.get("linkedin_url", ""), org.get("raw_address", "") or org.get("street_address", ""),
+                  org.get("state", ""), org.get("city", ""), org.get("estimated_num_employees"),
+                  org.get("organization_revenue"), org.get("industry", ""),
+                  batch_id, org_id])
+
+        conn.execute(
+            "UPDATE pull_candidates SET enrich_status = 'done' WHERE batch_id = ? AND keep = 1 AND enrich_status = 'enriching'",
+            [batch_id]
+        )
+        conn.execute("UPDATE pull_batches SET stage = 'enriching' WHERE id = ?", [batch_id])
+        updated_rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
+
+    return jsonify({"candidates": [_candidate_row_to_dict(r) for r in updated_rows]})
+
+
+@app.route("/api/pull-contacts/apollo-webhook", methods=["POST"])
+def apollo_phone_webhook():
+    if request.args.get("key") != APOLLO_WEBHOOK_SECRET:
+        return jsonify({"error": "forbidden"}), 403
+
+    payload = request.get_json(silent=True) or {}
+    with get_db() as conn:
+        for person in payload.get("people", []):
+            person_id = person.get("id")
+            if not person_id:
+                continue
+            mobiles = [p for p in (person.get("phone_numbers") or []) if p.get("type_cd") == "mobile"]
+            if mobiles:
+                number = mobiles[0].get("sanitized_number") or mobiles[0].get("raw_number")
+                row = conn.execute(
+                    "SELECT id, apollo_contact_id FROM pull_candidates WHERE apollo_person_id = ?", [person_id]
+                ).fetchone()
+                conn.execute(
+                    "UPDATE pull_candidates SET mobile_phone = ?, mobile_status = 'found' WHERE apollo_person_id = ?",
+                    [number, person_id]
+                )
+                if row and row["apollo_contact_id"]:
+                    try:
+                        apollo.persist_apollo_phone(row["apollo_contact_id"], number)
+                    except requests.RequestException:
+                        pass
+            else:
+                conn.execute(
+                    "UPDATE pull_candidates SET mobile_status = 'not_found' WHERE apollo_person_id = ?",
+                    [person_id]
+                )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/pull-contacts/batches/<int:batch_id>/filter-incomplete", methods=["POST"])
+@login_required
+def filter_incomplete_candidates(batch_id):
+    body = request.get_json()
+    required = body.get("require") or []  # subset of: email, mobile_phone, linkedin_url
+    column_map = {"email": "email", "mobile_phone": "mobile_phone", "linkedin_url": "linkedin_url"}
+    columns = [column_map[f] for f in required if f in column_map]
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ? AND keep = 1", [batch_id]).fetchall()
+        for r in rows:
+            complete = all(r[col] for col in columns)
+            if not complete:
+                conn.execute("UPDATE pull_candidates SET keep = 0 WHERE id = ?", [r["id"]])
+        conn.execute("UPDATE pull_batches SET stage = 'ready' WHERE id = ?", [batch_id])
+        updated_rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
+    return jsonify({"candidates": [_candidate_row_to_dict(r) for r in updated_rows]})
+
+
+@app.route("/api/pull-contacts/batches/<int:batch_id>/push", methods=["POST"])
+@login_required
+def push_pull_batch(batch_id):
+    body = request.get_json()
+    sales_focus = body.get("sales_focus", "")
+    lead_source = body.get("lead_source", "")
+    owner_id = body.get("owner_id") or None
+    create_tasks = bool(body.get("create_tasks"))
+    task_due_iso = body.get("task_due_iso") or datetime.now(timezone.utc).isoformat()
+
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM pull_candidates WHERE batch_id = ? AND keep = 1", [batch_id]
+        ).fetchall()
+        candidates = [_candidate_row_to_dict(r) for r in rows]
+
+        results = apollo.push_candidates_to_hubspot(candidates, sales_focus, lead_source, owner_id)
+
+        pushed_at = datetime.now(timezone.utc).isoformat()
+        contact_ids_with_state = []
+        for c, result in zip([c for c in candidates if c["email"]], results):
+            hs_id = result.get("id")
+            if hs_id:
+                conn.execute(
+                    "UPDATE pull_candidates SET hubspot_contact_id = ?, pushed_at = ? WHERE id = ?",
+                    [hs_id, pushed_at, c["id"]]
+                )
+                contact_ids_with_state.append((hs_id, c["state"]))
+
+        task_ids = []
+        if create_tasks and owner_id and contact_ids_with_state:
+            task_ids = apollo.create_call_tasks(contact_ids_with_state, owner_id, task_due_iso)
+
+        conn.execute("UPDATE pull_batches SET stage = 'pushed' WHERE id = ?", [batch_id])
+
+    return jsonify({
+        "pushed": len(contact_ids_with_state),
+        "tasks_created": len(task_ids),
+    })
 
 
 if __name__ == "__main__":
