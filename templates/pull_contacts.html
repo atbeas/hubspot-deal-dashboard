@@ -210,7 +210,7 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th style="width:30px"></th><th>Name</th><th>Title</th><th>Company</th><th>Email on file</th><th>Direct phone on file</th></tr></thead>
+          <thead><tr><th style="width:30px"></th><th>Name</th><th>Title</th><th>Company</th><th>Email on file</th><th>Direct phone on file</th><th>Seen before?</th></tr></thead>
           <tbody id="scrubBody"></tbody>
         </table>
       </div>
@@ -453,6 +453,15 @@ document.getElementById('runSearchBtn').addEventListener('click', async () => {
   }
 });
 
+function seenBeforeCell(c) {
+  if (!c.prior_pull) return '<span class="pill pill-good">new</span>';
+  const when = formatTimestamp(c.prior_pull.created_at);
+  if (c.prior_pull.pushed_at) {
+    return `<span class="pill pill-bad" title="Batch: ${esc(c.prior_pull.search_name)}">Pushed ${formatTimestamp(c.prior_pull.pushed_at)}</span>`;
+  }
+  return `<span class="pill pill-warn" title="Batch: ${esc(c.prior_pull.search_name)}">Seen ${when}, not pushed</span>`;
+}
+
 function renderScrubTable() {
   const kept = currentCandidates.filter(c => c.keep).length;
   document.getElementById('totalKept').textContent = kept;
@@ -464,8 +473,9 @@ function renderScrubTable() {
       <td>${esc(c.company_name)}</td>
       <td>${c.has_email !== false ? '<span class="pill pill-good">has email</span>' : '<span class="pill pill-bad">none</span>'}</td>
       <td>${c.has_direct_phone ? '<span class="pill pill-good">has phone</span>' : '<span class="pill pill-warn">none</span>'}</td>
+      <td>${seenBeforeCell(c)}</td>
     </tr>
-  `).join('') || '<tr><td colspan="6" class="empty-hint">No results — try widening your criteria</td></tr>';
+  `).join('') || '<tr><td colspan="7" class="empty-hint">No results — try widening your criteria</td></tr>';
 }
 
 function toggleCandidate(id, keep) {

@@ -1892,6 +1892,43 @@ def _candidate_row_to_dict(row):
     }
 
 
+def _attach_prior_pull_info(conn, candidates, current_batch_id):
+    """Flags candidates whose apollo_person_id already showed up in a
+    different past batch, so the operator can see it's a repeat (and whether
+    it was already pushed) before deciding to keep enriching/pushing it
+    again. Keyed on apollo_person_id, not email -- email isn't known yet at
+    the Scrub stage, before enrichment reveals it.
+    """
+    person_ids = [c["apollo_person_id"] for c in candidates if c.get("apollo_person_id")]
+    if not person_ids:
+        return candidates
+    placeholders = ",".join("?" * len(person_ids))
+    rows = conn.execute(f"""
+        SELECT pc.apollo_person_id, pc.pushed_at, pc.hubspot_contact_id,
+               pb.id AS batch_id, pb.search_name, pb.created_at
+        FROM pull_candidates pc
+        JOIN pull_batches pb ON pb.id = pc.batch_id
+        WHERE pc.apollo_person_id IN ({placeholders}) AND pc.batch_id != ?
+        ORDER BY pb.created_at DESC
+    """, person_ids + [current_batch_id]).fetchall()
+
+    prior_by_person = {}
+    for r in rows:
+        pid = r["apollo_person_id"]
+        if pid not in prior_by_person:  # first hit wins = most recent, thanks to ORDER BY DESC
+            prior_by_person[pid] = {
+                "batch_id": r["batch_id"],
+                "search_name": r["search_name"] or "Untitled pull",
+                "created_at": r["created_at"],
+                "pushed_at": r["pushed_at"],
+                "hubspot_contact_id": r["hubspot_contact_id"],
+            }
+
+    for c in candidates:
+        c["prior_pull"] = prior_by_person.get(c.get("apollo_person_id"))
+    return candidates
+
+
 @app.route("/pull-contacts")
 @login_required
 def pull_contacts_page():
@@ -1957,12 +1994,13 @@ def run_pull_search():
             """, [batch_id, c["apollo_person_id"], c["first_name"], c["last_name"],
                   c["title"], c["company_name"]])
         rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
+        candidates = _attach_prior_pull_info(conn, [_candidate_row_to_dict(r) for r in rows], batch_id)
 
     return jsonify({
         "batch_id": batch_id,
         "total_entries": result["total_entries"],
         "truncated": result.get("truncated", False),
-        "candidates": [_candidate_row_to_dict(r) for r in rows],
+        "candidates": candidates,
     })
 
 
@@ -2003,13 +2041,14 @@ def get_pull_batch(batch_id):
         if not batch:
             return jsonify({"error": "not found"}), 404
         rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
+        candidates = _attach_prior_pull_info(conn, [_candidate_row_to_dict(r) for r in rows], batch_id)
     return jsonify({
         "batch_id": batch_id,
         "stage": batch["stage"],
         "search_name": batch["search_name"],
         "criteria": json.loads(batch["criteria_json"]) if batch["criteria_json"] else {},
         "total_entries": batch["total_entries"] or 0,
-        "candidates": [_candidate_row_to_dict(r) for r in rows],
+        "candidates": candidates,
     })
 
 
