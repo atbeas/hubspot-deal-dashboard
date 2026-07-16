@@ -814,10 +814,17 @@ def get_deal_stage_labels():
 @login_required
 def get_client_deal_counts():
     # Powers the dashboard's client sidebar — how many deals landed for each
-    # client in the last 30 days, and which ones, so hovering a name shows
-    # the actual deal names (plus created date + current stage) without a
+    # client in the last 30 days (or, with ?range=mtd, since the start of the
+    # current calendar month), and which ones, so hovering a name shows the
+    # actual deal names (plus created date + current stage) without a
     # separate lookup per client.
-    since_ms = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp() * 1000)
+    range_param = request.args.get("range", "30d")
+    if range_param == "mtd":
+        now_pt = datetime.now(PACIFIC_TZ)
+        since_ms = int(now_pt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                       .astimezone(timezone.utc).timestamp() * 1000)
+    else:
+        since_ms = int((datetime.now(timezone.utc) - timedelta(days=30)).timestamp() * 1000)
     stage_labels = get_deal_stage_labels()
 
     filters = [

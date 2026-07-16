@@ -68,9 +68,21 @@
       background: #1e2030; border: 1px solid #2a2d3e; border-radius: 10px;
       padding: 16px; display: flex; flex-direction: column; gap: 10px;
     }
+    .client-sidebar-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
     .client-sidebar-title { font-size: .8rem; font-weight: 700; color: #e8e9f0; }
     .client-sidebar-sub { font-size: .72rem; font-weight: 500; color: #8b8fa8; display: block; margin-top: 2px; }
     .client-sidebar-empty { font-size: .82rem; color: #8b8fa8; }
+    .range-toggle {
+      flex-shrink: 0; display: flex; background: rgba(255,255,255,.06);
+      border: 1px solid #2a2d3e; border-radius: 7px; padding: 2px; gap: 2px;
+    }
+    .range-toggle-btn {
+      padding: 4px 10px; border-radius: 5px; font-size: .7rem; font-weight: 700;
+      color: #8b8fa8; cursor: pointer; border: none; background: transparent; white-space: nowrap;
+    }
+    .range-toggle-btn:hover { color: #e8e9f0; }
+    .range-toggle-btn.active { background: #ff5c35; color: #fff; }
+    .range-toggle-btn.active:hover { color: #fff; }
     .client-sidebar-header-row {
       display: flex; align-items: flex-end; justify-content: space-between;
       gap: 8px; padding: 0 8px; height: 30px; margin-top: 4px;
@@ -432,7 +444,9 @@
 
 <div class="dashboard-layout">
   <aside class="client-sidebar" id="clientSidebar">
-    <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">Deals created, last 30 days</span></div>
+    <div class="client-sidebar-title-row">
+      <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">Deals created, last 30 days</span></div>
+    </div>
     <div class="client-sidebar-empty">Loading…</div>
   </aside>
 
@@ -552,7 +566,8 @@
   let otherBucketDeals = []; // opposite archived/active bucket, same date range — conflict-check lookup only
   let showArchived = false;
   let allMeetings = [];
-  let clientDealCounts = {}; // rs_partner value -> { count, deals: [{id, name}] }, last 30 days
+  let clientDealCounts = {}; // rs_partner value -> { count, deals: [{id, name}] }, scoped to clientDealRange
+  let clientDealRange = '30d'; // '30d' or 'mtd' (month to date) — toggle in the client sidebar
 
   // Client options come from the server (rs_partner enum), alphabetized for easier scanning
   const CLIENT_OPTIONS = ({{ client_options | tojson }}).sort((a, b) => a.label.localeCompare(b.label));
@@ -601,7 +616,7 @@
 
   async function loadClientDealCounts() {
     try {
-      const r = await fetch('/api/client-deal-counts');
+      const r = await fetch(`/api/client-deal-counts?range=${clientDealRange}`);
       const d = await r.json();
       clientDealCounts = d.clients || {};
     } catch(e) {
@@ -610,13 +625,35 @@
     renderClientSidebar();
   }
 
+  function setClientDealRange(range) {
+    if (range === clientDealRange) return;
+    clientDealRange = range;
+    loadClientDealCounts();
+  }
+
+  function clientDealRangeLabel() {
+    return clientDealRange === 'mtd' ? 'Deals created, month to date' : 'Deals created, last 30 days';
+  }
+
+  function rangeToggleHtml() {
+    return `
+      <div class="range-toggle">
+        <button type="button" class="range-toggle-btn${clientDealRange === '30d' ? ' active' : ''}" onclick="setClientDealRange('30d')">30 Days</button>
+        <button type="button" class="range-toggle-btn${clientDealRange === 'mtd' ? ' active' : ''}" onclick="setClientDealRange('mtd')">This Month</button>
+      </div>
+    `;
+  }
+
   function renderClientSidebar() {
     const wrap = document.getElementById('clientSidebar');
     const enabledClients = CLIENT_OPTIONS.filter(o => o.enabled !== false);
 
     if (!enabledClients.length) {
       wrap.innerHTML = `
-        <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">Deals created, last 30 days</span></div>
+        <div class="client-sidebar-title-row">
+          <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">${clientDealRangeLabel()}</span></div>
+          ${rangeToggleHtml()}
+        </div>
         <div class="client-sidebar-empty">No active clients</div>
       `;
       return;
@@ -633,7 +670,10 @@
       .sort((a, b) => a.label.localeCompare(b.label));
 
     wrap.innerHTML = `
-      <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">Deals created, last 30 days</span></div>
+      <div class="client-sidebar-title-row">
+        <div class="client-sidebar-title">Clients<span class="client-sidebar-sub">${clientDealRangeLabel()}</span></div>
+        ${rangeToggleHtml()}
+      </div>
       <div class="client-sidebar-header-row">
         <span class="client-sidebar-header-name"></span>
         <span class="client-sidebar-header-slot"><span class="client-sidebar-header-label quota">Quota</span></span>
