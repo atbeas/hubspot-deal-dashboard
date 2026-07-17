@@ -1402,21 +1402,34 @@ def get_meetings():
     # see meetings regardless of which mailbox they're actually booked on.
     meetings = []
     for cal in CONNECTED_CALENDARS:
-        resp = requests.get(
-            f"https://graph.microsoft.com/v1.0/users/{cal['email']}/calendarView",
-            headers=ms_headers,
-            params={
-                "startDateTime": start,
-                "endDateTime":   end,
-                "$select":       "id,subject,start,end,attendees",
-                "$orderby":      "start/dateTime",
-                "$top":          100,
-            },
-        )
-        if not resp.ok:
-            continue
+        url = f"https://graph.microsoft.com/v1.0/users/{cal['email']}/calendarView"
+        params = {
+            "startDateTime": start,
+            "endDateTime":   end,
+            "$select":       "id,subject,start,end,attendees",
+            "$orderby":      "start/dateTime",
+            "$top":          100,
+        }
 
-        for e in resp.json().get("value", []):
+        # A single calendarView page tops out at 100 events (Graph expands
+        # recurring instances individually, so a dense personal calendar can
+        # blow through that within days, not months) — follow @odata.nextLink
+        # until exhausted so later events in the window aren't silently
+        # dropped. Capped at 50 pages (5000 events) as a runaway backstop —
+        # confirmed andrew@runwayselling.com's full 97-day window needs 21.
+        events = []
+        for _ in range(50):
+            resp = requests.get(url, headers=ms_headers, params=params)
+            if not resp.ok:
+                break
+            data = resp.json()
+            events.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+            params = None
+            if not url:
+                break
+
+        for e in events:
             start_utc = ""
             try:
                 # Graph calendarView returns UTC dateTimes without a "Z" suffix
