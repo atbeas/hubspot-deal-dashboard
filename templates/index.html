@@ -317,6 +317,8 @@
     .conflict-role-line { color: #c9cad8; }
     .conflict-role-line .role-empty { color: #5c607a; }
     .conflict-role-warning { color: #f87171; font-weight: 700; }
+    .conflict-attendees { color: #8b8fa8; font-size: .74rem; line-height: 1.5; }
+    .conflict-attendee-warning { color: #f87171; font-weight: 700; }
     @media (max-width: 720px) {
       .conflict-panel { border-left: none; padding-left: 0; border-top: 1px solid #2a2d3e; padding-top: 14px; }
     }
@@ -776,6 +778,10 @@
     return allOwners.find(o => o.id === id)?.name || '';
   }
 
+  function ownerEmail(id) {
+    return (allOwners.find(o => o.id === id)?.email || '').toLowerCase();
+  }
+
   // The meeting a deal is actually tied to: confirmed Step 3 pick if present,
   // otherwise the auto-suggested match.
   function getDealMeetingId(d) {
@@ -845,7 +851,24 @@
     if (!conflicts.length) {
       return '<div class="conflict-empty">✓ No other meetings at this time</div>';
     }
+    // This deal's own AM/SE/SD, by email — used to flag when one of them is
+    // a real invitee on the OTHER meeting, straight from the calendar invite
+    // itself. This works even when the other meeting can't be tied to a
+    // loaded deal at all (e.g. an internal sync, or a deal outside the
+    // dashboard's date range) since it only needs the calendar's own guest
+    // list, not a HubSpot match.
+    const myTeamEmails = ['am', 'se', 'sd']
+      .map(role => ownerEmail(d[role]))
+      .filter(Boolean);
+
     return conflicts.map(c => {
+      const attendees = c.meeting.attendees || [];
+      const attendeesHtml = attendees.length
+        ? `<div class="conflict-attendees">Invitees: ${attendees.map(a => {
+            const isMyTeam = myTeamEmails.includes((a.email || '').toLowerCase());
+            return `<span class="${isMyTeam ? 'conflict-attendee-warning' : ''}">${isMyTeam ? '⚠ ' : ''}${esc(a.name || a.email)}</span>`;
+          }).join(', ')}</div>`
+        : '';
       // Always list who's already assigned on the other meeting — not just
       // roles that happen to clash — so a double-booking can be caught by eye
       // before adding someone, without checking every other calendar by hand.
@@ -866,6 +889,7 @@
       return `
         <div class="conflict-item">
           <div class="conflict-meeting">${esc(c.meeting.label)}${calTag}</div>
+          ${attendeesHtml}
           ${dealLine}
           ${c.otherDeal ? roleLines : ''}
         </div>`;

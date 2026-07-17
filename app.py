@@ -1456,6 +1456,13 @@ def get_meetings():
                     "start_utc": start_utc,
                     "calendar": cal["email"],
                     "calendar_label": cal["label"],
+                    "attendees": [
+                        {
+                            "name": a.get("emailAddress", {}).get("name") or a.get("emailAddress", {}).get("address", ""),
+                            "email": a.get("emailAddress", {}).get("address", ""),
+                        }
+                        for a in e.get("attendees", [])
+                    ],
                 })
 
     meetings.sort(key=lambda m: m["start_utc"])
