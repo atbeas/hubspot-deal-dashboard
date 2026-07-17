@@ -1398,10 +1398,7 @@ def get_meetings():
     start = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
     end   = (now + timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Pull from every connected calendar so Step 3 and the conflict check can
-    # see meetings regardless of which mailbox they're actually booked on.
-    meetings = []
-    for cal in CONNECTED_CALENDARS:
+    def fetch_calendar_events(cal):
         url = f"https://graph.microsoft.com/v1.0/users/{cal['email']}/calendarView"
         params = {
             "startDateTime": start,
@@ -1417,9 +1414,14 @@ def get_meetings():
         # until exhausted so later events in the window aren't silently
         # dropped. Capped at 50 pages (5000 events) as a runaway backstop —
         # confirmed andrew@runwayselling.com's full 97-day window needs 21.
+        # Explicit timeout so one slow/throttled Graph call can't hang the
+        # request past gunicorn's worker timeout.
         events = []
         for _ in range(50):
-            resp = requests.get(url, headers=ms_headers, params=params)
+            try:
+                resp = requests.get(url, headers=ms_headers, params=params, timeout=10)
+            except requests.exceptions.RequestException:
+                break
             if not resp.ok:
                 break
             data = resp.json()
@@ -1428,25 +1430,33 @@ def get_meetings():
             params = None
             if not url:
                 break
+        return cal, events
 
-        for e in events:
-            start_utc = ""
-            try:
-                # Graph calendarView returns UTC dateTimes without a "Z" suffix
-                # (confirmed via start.timeZone == "UTC") unless a Prefer header
-                # requests otherwise, so treat the raw value as UTC.
-                dt_utc = datetime.fromisoformat(e["start"]["dateTime"].rstrip("Z")).replace(tzinfo=timezone.utc)
-                start_utc = dt_utc.isoformat()
-                label = f"{e['subject']} — {dt_utc.astimezone(PACIFIC_TZ).strftime('%b %d, %Y %-I:%M %p')} PT"
-            except Exception:
-                label = e.get("subject", "(No subject)")
-            meetings.append({
-                "id": e["id"],
-                "label": label,
-                "start_utc": start_utc,
-                "calendar": cal["email"],
-                "calendar_label": cal["label"],
-            })
+    # Fetch every connected calendar concurrently — sequentially, a dense
+    # calendar's 20+ pages plus two more calendars pushed total wall time
+    # past gunicorn's worker timeout (confirmed via WORKER TIMEOUT in
+    # production logs the first time pagination was added).
+    meetings = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(CONNECTED_CALENDARS) or 1) as ex:
+        for cal, events in ex.map(fetch_calendar_events, CONNECTED_CALENDARS):
+            for e in events:
+                start_utc = ""
+                try:
+                    # Graph calendarView returns UTC dateTimes without a "Z" suffix
+                    # (confirmed via start.timeZone == "UTC") unless a Prefer header
+                    # requests otherwise, so treat the raw value as UTC.
+                    dt_utc = datetime.fromisoformat(e["start"]["dateTime"].rstrip("Z")).replace(tzinfo=timezone.utc)
+                    start_utc = dt_utc.isoformat()
+                    label = f"{e['subject']} — {dt_utc.astimezone(PACIFIC_TZ).strftime('%b %d, %Y %-I:%M %p')} PT"
+                except Exception:
+                    label = e.get("subject", "(No subject)")
+                meetings.append({
+                    "id": e["id"],
+                    "label": label,
+                    "start_utc": start_utc,
+                    "calendar": cal["email"],
+                    "calendar_label": cal["label"],
+                })
 
     meetings.sort(key=lambda m: m["start_utc"])
     return jsonify({"meetings": meetings})
