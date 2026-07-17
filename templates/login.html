@@ -34,14 +34,14 @@
     p  { font-size: .85rem; color: #6b7280; margin-bottom: 28px; }
 
     label { display: block; text-align: left; font-size: .78rem; font-weight: 600; color: #374151; margin-bottom: 6px; }
-    input[type="password"] {
+    input[type="password"], input[type="email"] {
       width: 100%; padding: 10px 14px;
       border: 1px solid #d1d5db; border-radius: 8px;
       font-size: .95rem; font-family: inherit; outline: none;
       transition: border-color .2s;
       margin-bottom: 16px;
     }
-    input[type="password"]:focus { border-color: #ff5c35; }
+    input[type="password"]:focus, input[type="email"]:focus { border-color: #ff5c35; }
 
     .error {
       background: #fef2f2; border: 1px solid #fecaca;
@@ -65,7 +65,7 @@
   <div class="card">
     <img class="brand-logo" src="{{ url_for('static', filename='runway_logo.png') }}" alt="Runway Selling" />
     <h1>Deal Allocation Dashboard</h1>
-    <p>Enter your password to continue</p>
+    <p>{% if locked_company %}Enter your password to continue{% else %}Sign in to continue{% endif %}</p>
 
     {% if error %}
     <div class="error">{{ error }}</div>
@@ -73,8 +73,12 @@
 
     <form method="POST">
       <input type="hidden" name="next" value="{{ next }}" />
+      {% if not locked_company %}
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" autofocus autocomplete="username" />
+      {% endif %}
       <label for="password">Password</label>
-      <input type="password" id="password" name="password" autofocus autocomplete="current-password" />
+      <input type="password" id="password" name="password" {{ 'autofocus' if locked_company }} autocomplete="current-password" />
       <button type="submit">Sign In</button>
     </form>
   </div>

@@ -205,6 +205,52 @@
     .template-subhead { font-size: .95rem; font-weight: 700; color: #1a1a2e; margin: 28px 0 4px; }
     .template-subhead:first-of-type { margin-top: 16px; }
 
+    /* ── Team & Access ── */
+    .user-card {
+      background: #fff; border: 1px solid #e2e4e9; border-radius: 12px;
+      padding: 16px 20px; margin-bottom: 12px;
+    }
+    .user-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+    .user-identity { display: flex; flex-direction: column; gap: 2px; }
+    .user-name { font-size: .95rem; font-weight: 700; color: #1a1a2e; display: flex; align-items: center; gap: 8px; }
+    .owner-pill {
+      font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
+      background: #ede9fe; color: #6d28d9; padding: 2px 8px; border-radius: 20px;
+    }
+    .user-email { font-size: .82rem; color: #6b7280; }
+    .user-actions { display: flex; align-items: center; gap: 10px; }
+    .user-actions label { display: flex; align-items: center; gap: 5px; font-size: .78rem; color: #6b7280; cursor: pointer; }
+    .btn-link-danger {
+      background: none; border: none; color: #dc2626; font-size: .8rem; font-weight: 600;
+      cursor: pointer; padding: 4px 6px;
+    }
+    .btn-link-danger:hover { text-decoration: underline; }
+    .user-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .tab-pill {
+      display: flex; align-items: center; gap: 5px; padding: 5px 10px;
+      border: 1px solid #d1d5db; border-radius: 20px; font-size: .78rem; color: #374151;
+      cursor: pointer; user-select: none; transition: border-color .15s, background .15s;
+    }
+    .tab-pill input { accent-color: #ff5c35; cursor: pointer; }
+    .tab-pill.checked { border-color: #ff5c35; background: #fff1ec; color: #ff5c35; font-weight: 600; }
+    .user-pw-row { display: flex; gap: 8px; margin-top: 12px; }
+    .user-pw-row input {
+      flex: 1; padding: 7px 12px; border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: .84rem; font-family: inherit; outline: none;
+    }
+    .user-pw-row input:focus { border-color: #ff5c35; }
+
+    .add-user-card {
+      background: #fff; border: 1px dashed #d1d5db; border-radius: 12px;
+      padding: 18px 20px; margin-bottom: 16px;
+    }
+    .add-user-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    .add-user-grid input {
+      padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: .86rem; font-family: inherit; outline: none;
+    }
+    .add-user-grid input:focus { border-color: #ff5c35; }
+
     #toast {
       position: fixed; bottom: 24px; right: 24px;
       background: #1a1a2e; color: #fff; padding: 11px 18px;
@@ -225,19 +271,42 @@
   </svg>
   <div>
     <h1>Admin</h1>
-    <p>Calendars, quick-notes passwords, client contacts, owner eligibility, and email templates</p>
+    <p>Team access, calendars, quick-notes passwords, client contacts, owner eligibility, and email templates</p>
   </div>
   <div class="header-nav">
-    <a href="/pull-contacts" class="nav-link">Pull Contacts</a>
-    <a href="/" class="nav-link">← Deal Alloc</a>
+    {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
+    {% if current_user.is_owner or 'dashboard' in current_user.tabs %}<a href="/" class="nav-link">← Deal Alloc</a>{% endif %}
     <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
-    <a href="/hs-workflows" class="nav-link">HS Workflows</a>
+    {% if current_user.is_owner or 'hs_workflows' in current_user.tabs %}<a href="/hs-workflows" class="nav-link">HS Workflows</a>{% endif %}
     <a href="/admin" class="nav-link active">Admin</a>
     <a href="/logout" class="nav-link">Log Out</a>
   </div>
 </header>
 
 <div class="page-wrap">
+  {% if current_user.is_owner %}
+  <div class="page-header">
+    <h2>Team &amp; Access</h2>
+    <p>Give teammates their own login and pick which tabs each of them can see. Anyone not listed here can't sign in at all.</p>
+  </div>
+
+  <div class="add-user-card">
+    <div class="add-user-grid">
+      <input type="text" id="newUserName" placeholder="Name" />
+      <input type="email" id="newUserEmail" placeholder="Email (used to sign in)" />
+      <input type="text" id="newUserPassword" placeholder="Password (min 4 characters)" />
+    </div>
+    <div class="user-tabs" id="newUserTabs"></div>
+    <div class="template-footer">
+      <button class="btn-save" id="addUserBtn" onclick="createUser()">Add Person</button>
+    </div>
+  </div>
+
+  <div id="userList"></div>
+
+  <hr class="section-divider" />
+  {% endif %}
+
   <div class="page-header">
     <h2>Connected Calendars</h2>
     <p>Calendars this app pulls meetings from and books invites on. More will be added here over time.</p>
@@ -428,6 +497,178 @@
 <div id="toast"></div>
 
 <script>
+  const TAB_DEFS = {{ TAB_DEFS | tojson }};
+  const IS_OWNER = {{ (current_user.is_owner | default(false)) | tojson }};
+  let allUsers = [];
+
+  function tabPillsHtml(selectedTabs, groupName) {
+    return TAB_DEFS.map(([key, label]) => `
+      <label class="tab-pill${selectedTabs.includes(key) ? ' checked' : ''}" data-tab-group="${groupName}" data-tab-key="${key}">
+        <input type="checkbox" value="${key}" ${selectedTabs.includes(key) ? 'checked' : ''} onchange="onTabPillChange(this)" />
+        ${label}
+      </label>
+    `).join('');
+  }
+
+  function onTabPillChange(checkbox) {
+    checkbox.closest('.tab-pill').classList.toggle('checked', checkbox.checked);
+  }
+
+  function collectCheckedTabs(groupName) {
+    return [...document.querySelectorAll(`.tab-pill[data-tab-group="${groupName}"] input:checked`)].map(i => i.value);
+  }
+
+  async function loadUsers() {
+    if (!IS_OWNER) return;
+    document.getElementById('newUserTabs').innerHTML = tabPillsHtml([], 'new');
+    try {
+      const r = await fetch('/api/admin/users');
+      const d = await r.json();
+      allUsers = d.users || [];
+    } catch (e) {
+      console.warn('Could not load users:', e);
+    }
+    renderUsers();
+  }
+
+  function renderUsers() {
+    const wrap = document.getElementById('userList');
+    wrap.innerHTML = allUsers.map(u => `
+      <div class="user-card" id="user-${u.id}">
+        <div class="user-top">
+          <div class="user-identity">
+            <div class="user-name">${esc(u.name)}${u.is_owner ? '<span class="owner-pill">Owner</span>' : ''}</div>
+            <div class="user-email">${esc(u.email)}</div>
+          </div>
+          <div class="user-actions">
+            <label><input type="checkbox" ${u.active ? 'checked' : ''} ${u.is_owner ? 'disabled' : ''}
+                   onchange="setUserActive(${u.id}, this.checked)" /> Active</label>
+            ${u.is_owner ? '' : `<button class="btn-link-danger" onclick="deleteUser(${u.id}, '${esc(u.name)}')">Remove</button>`}
+          </div>
+        </div>
+        ${u.is_owner ? '' : `
+        <div class="user-tabs" id="tabs-${u.id}">${tabPillsHtml(u.tabs, `user-${u.id}`)}</div>
+        <div class="template-footer">
+          <button class="btn-save" onclick="saveUserTabs(${u.id})">Save Tabs</button>
+        </div>
+        `}
+        <div class="user-pw-row">
+          <input type="text" id="pw-user-${u.id}" placeholder="New password…" />
+          <button class="btn-save" onclick="resetUserPassword(${u.id}, this)">Reset Password</button>
+        </div>
+      </div>
+    `).join('') || '<p style="font-size:.85rem; color:#6b7280;">No teammates added yet.</p>';
+  }
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  async function createUser() {
+    const name = document.getElementById('newUserName').value.trim();
+    const email = document.getElementById('newUserEmail').value.trim();
+    const password = document.getElementById('newUserPassword').value.trim();
+    const tabs = collectCheckedTabs('new');
+    if (!name || !email || password.length < 4) {
+      showToast('Name, email, and a password of at least 4 characters are required', true);
+      return;
+    }
+    const btn = document.getElementById('addUserBtn');
+    btn.disabled = true;
+    try {
+      const resp = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password, tabs }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Failed to add user');
+      document.getElementById('newUserName').value = '';
+      document.getElementById('newUserEmail').value = '';
+      document.getElementById('newUserPassword').value = '';
+      document.getElementById('newUserTabs').innerHTML = tabPillsHtml([], 'new');
+      showToast(`${name} added`);
+      await loadUsers();
+    } catch (e) {
+      showToast(e.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function saveUserTabs(userId) {
+    const tabs = collectCheckedTabs(`user-${userId}`);
+    try {
+      const resp = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabs }),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      showToast('Tabs updated');
+      await loadUsers();
+    } catch (e) {
+      showToast('Failed to save tabs', true);
+    }
+  }
+
+  async function setUserActive(userId, active) {
+    try {
+      const resp = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Save failed');
+      showToast(active ? 'User re-activated' : 'User deactivated — they can no longer sign in');
+    } catch (e) {
+      showToast(e.message, true);
+      await loadUsers();
+    }
+  }
+
+  async function resetUserPassword(userId, btn) {
+    const input = document.getElementById(`pw-user-${userId}`);
+    const password = input.value.trim();
+    if (password.length < 4) {
+      showToast('Password must be at least 4 characters', true);
+      return;
+    }
+    btn.disabled = true;
+    try {
+      const resp = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      input.value = '';
+      showToast('Password updated');
+    } catch (e) {
+      showToast('Failed to save', true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function deleteUser(userId, name) {
+    if (!confirm(`Remove ${name}? They will immediately lose access.`)) return;
+    try {
+      const resp = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Failed to remove');
+      showToast(`${name} removed`);
+      await loadUsers();
+    } catch (e) {
+      showToast(e.message, true);
+    }
+  }
+
+  loadUsers();
+
   async function savePassword(key, btn) {
     const input = document.getElementById(`pw-${key}`);
     const password = input.value.trim();

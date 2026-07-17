@@ -414,12 +414,12 @@
     <p>Assign Client, Sales Development, Account Manager, and Sales Executive to new deals</p>
   </div>
   <div class="header-nav">
-    <a href="/pull-contacts" class="nav-link">Pull Contacts</a>
+    {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
     <a href="/" class="nav-link active">Deal Alloc</a>
-    <a href="#" class="nav-link" id="archiveTabLink" onclick="toggleArchiveView(event)">Archived Deals</a>
+    {% if current_user.is_owner or 'archived' in current_user.tabs %}<a href="#" class="nav-link" id="archiveTabLink" onclick="toggleArchiveView(event)">Archived Deals</a>{% endif %}
     <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
-    <a href="/hs-workflows" class="nav-link">HS Workflows</a>
-    <a href="/admin" class="nav-link">Admin</a>
+    {% if current_user.is_owner or 'hs_workflows' in current_user.tabs %}<a href="/hs-workflows" class="nav-link">HS Workflows</a>{% endif %}
+    {% if current_user.is_owner or 'admin' in current_user.tabs %}<a href="/admin" class="nav-link">Admin</a>{% endif %}
     <a href="/logout" class="nav-link">Log Out</a>
   </div>
 </header>

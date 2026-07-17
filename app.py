@@ -14,6 +14,19 @@ import apollo_pipeline as apollo
 
 PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
 
+# Every real tab a person can be granted access to. "admin" gates the whole
+# /admin page (calendars, quick-notes passwords, client/owner settings,
+# email templates) — the "Team & Access" panel inside it (creating people,
+# assigning tabs) is separately locked to is_owner regardless of this.
+TAB_DEFS = [
+    ("dashboard",     "Deal Alloc"),
+    ("archived",      "Archived Deals"),
+    ("hs_workflows",  "HS Workflows"),
+    ("pull_contacts", "Pull Contacts"),
+    ("admin",         "Admin"),
+]
+TAB_KEYS = [key for key, _ in TAB_DEFS]
+
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", os.path.dirname(__file__)), "client_contacts.db")
 
 def get_db():
@@ -182,6 +195,37 @@ def init_db():
                 }), datetime.now(timezone.utc).isoformat()]
             )
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                is_owner INTEGER NOT NULL DEFAULT 0,
+                active INTEGER NOT NULL DEFAULT 1,
+                tabs TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL
+            )
+        """)
+        # Seed the one owner account from the legacy shared APP_PASSWORD so
+        # switching to per-person logins can't lock everyone out on deploy —
+        # only runs once, the first time this table is empty.
+        existing_users = conn.execute("SELECT COUNT(*) c FROM app_users").fetchone()["c"]
+        if existing_users == 0:
+            seed_password = os.environ.get("APP_PASSWORD", "")
+            if seed_password:
+                conn.execute(
+                    "INSERT INTO app_users (name, email, password_hash, is_owner, active, tabs, created_at) "
+                    "VALUES (?, ?, ?, 1, 1, ?, ?)",
+                    [
+                        "Andrew Beasley",
+                        os.environ.get("ADMIN_EMAIL", "andrew@runwayselling.com").lower(),
+                        generate_password_hash(seed_password),
+                        json.dumps(TAB_KEYS),
+                        datetime.now(timezone.utc).isoformat(),
+                    ],
+                )
+
 init_db()
 
 MS_TENANT_ID     = os.environ.get("MS_TENANT_ID", "")
@@ -293,37 +337,119 @@ APP_PASSWORD     = os.environ.get("APP_PASSWORD", "")
 BASE_URL = "https://api.hubapi.com"
 HEADERS = {"Authorization": f"Bearer {HUBSPOT_API_KEY}", "Content-Type": "application/json"}
 
-def login_required(f):
-    """Admin-only: the main dashboard password."""
+def get_current_user():
+    """The logged-in app_users row for this session, or None. Session scope
+    for a real person is 'user:<id>' — distinct from quick-notes' own
+    'company:<key>' scope, which this never touches."""
+    scope = session.get("scope", "")
+    if not scope.startswith("user:"):
+        return None
+    try:
+        user_id = int(scope.split(":", 1)[1])
+    except ValueError:
+        return None
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM app_users WHERE id = ? AND active = 1", [user_id]
+        ).fetchone()
+    if not row:
+        return None
+    user = dict(row)
+    user["tabs"] = json.loads(user["tabs"] or "[]")
+    return user
+
+
+def user_has_tab(user, tab_key):
+    return bool(user) and (user["is_owner"] or tab_key in user["tabs"])
+
+
+def first_accessible_url(user):
+    """Where to send someone right after login — their first granted tab,
+    in nav order, or a plain no-access notice if they have none yet."""
+    for key in TAB_KEYS:
+        if key == "archived":
+            continue  # not a standalone page, always paired with dashboard
+        if user_has_tab(user, key):
+            return url_for({"dashboard": "index", "hs_workflows": "hs_workflows_page",
+                            "pull_contacts": "pull_contacts_page", "admin": "admin"}[key])
+    return url_for("no_access")
+
+
+def tab_required(tab_key):
+    """Logged-in AND granted this specific tab (owners always pass)."""
+    def wrapper(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            user = get_current_user()
+            if not user:
+                return redirect(url_for("login", next=request.path))
+            if not user_has_tab(user, tab_key):
+                return "You don't have access to this section.", 403
+            return f(*args, **kwargs)
+        return decorated
+    return wrapper
+
+
+def tab_required_any(*tab_keys):
+    """Logged-in AND granted at least one of these tabs — for endpoints
+    genuinely shared by more than one page (e.g. an email template editable
+    from Admin but also read by the dashboard's compose modal)."""
+    def wrapper(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            user = get_current_user()
+            if not user:
+                return redirect(url_for("login", next=request.path))
+            if not any(user_has_tab(user, k) for k in tab_keys):
+                return "You don't have access to this section.", 403
+            return f(*args, **kwargs)
+        return decorated
+    return wrapper
+
+
+def owner_required(f):
+    """Only the account-owner role — managing people/tabs themselves."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        if session.get("scope") != "admin":
+        user = get_current_user()
+        if not user:
             return redirect(url_for("login", next=request.path))
+        if not user["is_owner"]:
+            return "Owner access required.", 403
         return f(*args, **kwargs)
     return decorated
 
 
 def quick_notes_login_required(f):
-    """Admin OR that specific company's own password can access."""
+    """The owner (for oversight, same as the old single admin password) OR
+    that specific company's own password."""
     @wraps(f)
     def decorated(*args, **kwargs):
         company = kwargs.get("company")
-        scope = session.get("scope")
-        if scope == "admin" or scope == f"company:{company}":
+        scope = session.get("scope", "")
+        user = get_current_user()
+        if (user and user["is_owner"]) or scope == f"company:{company}":
             return f(*args, **kwargs)
         return redirect(url_for("login", next=request.path))
     return decorated
 
 
 def any_login_required(f):
-    """Admin OR any company session can access (shared write endpoint)."""
+    """A person with dashboard access OR any company session (shared write
+    endpoint used by both the main dashboard and quick-notes pages)."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        scope = session.get("scope")
-        if scope == "admin" or (scope and scope.startswith("company:")):
+        scope = session.get("scope", "")
+        user = get_current_user()
+        if (user and user_has_tab(user, "dashboard")) or scope.startswith("company:"):
             return f(*args, **kwargs)
         return redirect(url_for("login", next=request.path))
     return decorated
+
+
+@app.context_processor
+def inject_current_user():
+    return {"current_user": get_current_user(), "TAB_DEFS": TAB_DEFS}
 
 
 def get_company_password_hash(company):
@@ -371,31 +497,48 @@ OWNER_ROLES = {"sd", "am", "se"}
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
-    next_url = request.values.get("next") or url_for("index")
+    explicit_next = request.values.get("next") or ""
     locked_company = _locked_company_for_host()
     if request.method == "POST":
         password = request.form.get("password", "")
         if locked_company:
             if check_company_password(locked_company, password):
                 session["scope"] = f"company:{locked_company}"
-                return redirect(next_url)
+                return redirect(explicit_next or url_for("index"))
+            error = "Incorrect password."
         else:
-            if password == APP_PASSWORD:
-                session["scope"] = "admin"
-                return redirect(next_url)
+            email = request.form.get("email", "").strip().lower()
+            user_row = None
+            if email:
+                with get_db() as conn:
+                    user_row = conn.execute(
+                        "SELECT * FROM app_users WHERE email = ? AND active = 1", [email]
+                    ).fetchone()
+            if user_row and check_password_hash(user_row["password_hash"], password):
+                session["scope"] = f"user:{user_row['id']}"
+                user = dict(user_row)
+                user["tabs"] = json.loads(user["tabs"] or "[]")
+                return redirect(explicit_next or first_accessible_url(user))
             # Also allow a company password to log straight into its own
             # quick-notes page even from the main domain.
             for key in QUICK_NOTES_COMPANIES:
                 if get_company_password_hash(key) and check_company_password(key, password):
                     session["scope"] = f"company:{key}"
                     return redirect(url_for("quick_notes", company=key))
-        error = "Incorrect password."
-    return render_template("login.html", error=error, next=next_url)
+            error = "Incorrect email or password."
+    return render_template("login.html", error=error, next=explicit_next, locked_company=locked_company)
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+@app.route("/no-access")
+def no_access():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+    return "No tabs have been enabled on your account yet. Ask your admin to grant access in Admin → Team & Access."
 
 # Custom domains that should land directly on a company's quick-notes page
 # instead of the full dashboard.
@@ -416,8 +559,11 @@ def index():
         # its own login check for the unauthenticated case.
         return redirect(url_for("quick_notes", company=company))
 
-    if session.get("scope") != "admin":
+    user = get_current_user()
+    if not user:
         return redirect(url_for("login", next=request.path))
+    if not user_has_tab(user, "dashboard"):
+        return "You don't have access to this section.", 403
 
     # Fetch rs_partner enum options
     client_options = []
@@ -627,7 +773,7 @@ def get_deal_archive():
 
 
 @app.route("/api/owners")
-@login_required
+@tab_required_any('dashboard', 'admin')
 def get_owners():
     owners = fetch_hubspot_owners()
     eligibility = get_owner_eligibility()
@@ -643,7 +789,7 @@ ELIGIBILITY_COLUMNS = {"am": "eligible_am", "se": "eligible_se", "sd": "eligible
 
 
 @app.route("/api/owners/<owner_id>/eligibility", methods=["POST"])
-@login_required
+@tab_required('admin')
 def set_owner_eligibility(owner_id):
     body = request.get_json()
     role = body.get("role")
@@ -662,11 +808,13 @@ def set_owner_eligibility(owner_id):
 
 
 @app.route("/api/deals")
-@login_required
+@tab_required('dashboard')
 def get_deals():
     start = request.args.get("start")
     end   = request.args.get("end")
     show_archived = request.args.get("archived", "false").lower() == "true"
+    if show_archived and not user_has_tab(get_current_user(), "archived"):
+        return jsonify({"error": "Not authorized for archived deals"}), 403
     if not start or not end:
         return jsonify({"error": "start and end required"}), 400
 
@@ -811,7 +959,7 @@ def get_deal_stage_labels():
 
 
 @app.route("/api/client-deal-counts")
-@login_required
+@tab_required('dashboard')
 def get_client_deal_counts():
     # Powers the dashboard's client sidebar — how many deals landed for each
     # client in the last 30 days (or, with ?range=mtd, since the start of the
@@ -1049,7 +1197,7 @@ def submit_quick_note(company, deal_id):
 
 
 @app.route("/admin")
-@login_required
+@tab_required('admin')
 def admin():
     company_domains = {v: k for k, v in QUICK_NOTES_HOST_MAP.items()}
     companies = []
@@ -1124,13 +1272,13 @@ def admin():
 
 
 @app.route("/settings")
-@login_required
+@tab_required('admin')
 def settings():
     return redirect(url_for("admin"))
 
 
 @app.route("/api/admin/companies/<company>/password", methods=["POST"])
-@login_required
+@tab_required('admin')
 def set_company_password_route(company):
     if company not in QUICK_NOTES_COMPANIES:
         return jsonify({"error": "Unknown company"}), 404
@@ -1142,8 +1290,103 @@ def set_company_password_route(company):
     return jsonify({"ok": True})
 
 
+def _user_public(row):
+    d = dict(row)
+    d.pop("password_hash", None)
+    d["tabs"] = json.loads(d["tabs"] or "[]")
+    return d
+
+
+@app.route("/api/admin/users")
+@owner_required
+def list_users():
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM app_users ORDER BY created_at").fetchall()
+    return jsonify({"users": [_user_public(r) for r in rows]})
+
+
+@app.route("/api/admin/users", methods=["POST"])
+@owner_required
+def create_user():
+    body = request.get_json() or {}
+    name = (body.get("name") or "").strip()
+    email = (body.get("email") or "").strip().lower()
+    password = (body.get("password") or "").strip()
+    tabs = [t for t in (body.get("tabs") or []) if t in TAB_KEYS]
+
+    if not name or not email or len(password) < 4:
+        return jsonify({"error": "Name, email, and a password of at least 4 characters are required"}), 400
+
+    with get_db() as conn:
+        existing = conn.execute("SELECT id FROM app_users WHERE email = ?", [email]).fetchone()
+        if existing:
+            return jsonify({"error": "A user with that email already exists"}), 400
+        cur = conn.execute(
+            "INSERT INTO app_users (name, email, password_hash, is_owner, active, tabs, created_at) "
+            "VALUES (?, ?, ?, 0, 1, ?, ?)",
+            [name, email, generate_password_hash(password), json.dumps(tabs),
+             datetime.now(timezone.utc).isoformat()],
+        )
+        row = conn.execute("SELECT * FROM app_users WHERE id = ?", [cur.lastrowid]).fetchone()
+    return jsonify({"user": _user_public(row)})
+
+
+@app.route("/api/admin/users/<int:user_id>", methods=["PATCH"])
+@owner_required
+def update_user(user_id):
+    body = request.get_json() or {}
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM app_users WHERE id = ?", [user_id]).fetchone()
+        if not row:
+            return jsonify({"error": "User not found"}), 404
+
+        updates, params = [], []
+        if "name" in body:
+            name = (body["name"] or "").strip()
+            if not name:
+                return jsonify({"error": "Name can't be empty"}), 400
+            updates.append("name = ?"); params.append(name)
+        if "tabs" in body:
+            tabs = [t for t in (body["tabs"] or []) if t in TAB_KEYS]
+            updates.append("tabs = ?"); params.append(json.dumps(tabs))
+        if "active" in body:
+            active = bool(body["active"])
+            if not active and row["is_owner"]:
+                remaining = conn.execute(
+                    "SELECT COUNT(*) c FROM app_users WHERE is_owner = 1 AND active = 1 AND id != ?", [user_id]
+                ).fetchone()["c"]
+                if remaining == 0:
+                    return jsonify({"error": "Can't deactivate the only owner account"}), 400
+            updates.append("active = ?"); params.append(1 if active else 0)
+        if "password" in body and body["password"]:
+            password = body["password"].strip()
+            if len(password) < 4:
+                return jsonify({"error": "Password must be at least 4 characters"}), 400
+            updates.append("password_hash = ?"); params.append(generate_password_hash(password))
+
+        if updates:
+            params.append(user_id)
+            conn.execute(f"UPDATE app_users SET {', '.join(updates)} WHERE id = ?", params)
+
+        row = conn.execute("SELECT * FROM app_users WHERE id = ?", [user_id]).fetchone()
+    return jsonify({"user": _user_public(row)})
+
+
+@app.route("/api/admin/users/<int:user_id>", methods=["DELETE"])
+@owner_required
+def delete_user(user_id):
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM app_users WHERE id = ?", [user_id]).fetchone()
+        if not row:
+            return jsonify({"error": "User not found"}), 404
+        if row["is_owner"]:
+            return jsonify({"error": "Can't delete an owner account"}), 400
+        conn.execute("DELETE FROM app_users WHERE id = ?", [user_id])
+    return jsonify({"ok": True})
+
+
 @app.route("/api/meetings")
-@login_required
+@tab_required('dashboard')
 def get_meetings():
     token = get_ms_token()
     if not token:
@@ -1196,7 +1439,7 @@ def get_meetings():
 
 
 @app.route("/api/meetings/<path:event_id>/add-attendees", methods=["POST"])
-@login_required
+@tab_required('dashboard')
 def add_meeting_attendees(event_id):
     body     = request.get_json()
     emails   = [e for e in body.get("emails", []) if e]
@@ -1240,7 +1483,7 @@ def add_meeting_attendees(event_id):
 
 
 @app.route("/api/deals/<deal_id>/meeting", methods=["POST"])
-@login_required
+@tab_required('dashboard')
 def set_deal_meeting(deal_id):
     body = request.get_json()
     meeting_id       = body.get("meeting_id", "")
@@ -1261,7 +1504,7 @@ def set_deal_meeting(deal_id):
 
 
 @app.route("/api/deals/<deal_id>/archive", methods=["POST"])
-@login_required
+@tab_required('dashboard')
 def archive_deal(deal_id):
     with get_db() as conn:
         conn.execute("""
@@ -1272,7 +1515,7 @@ def archive_deal(deal_id):
 
 
 @app.route("/api/deals/<deal_id>/unarchive", methods=["POST"])
-@login_required
+@tab_required('dashboard')
 def unarchive_deal(deal_id):
     with get_db() as conn:
         conn.execute("DELETE FROM deal_archive WHERE deal_id = ?", [deal_id])
@@ -1280,14 +1523,14 @@ def unarchive_deal(deal_id):
 
 
 @app.route("/api/settings/email-template")
-@login_required
+@tab_required_any('dashboard', 'admin')
 def get_email_template():
     calendar = request.args.get("calendar", SCHEDULING_EMAIL)
     return jsonify({"template": prep_template_for(calendar)})
 
 
 @app.route("/api/settings/email-template", methods=["POST"])
-@login_required
+@tab_required('admin')
 def set_email_template():
     body = request.get_json()
     calendar = body.get("calendar", "")
@@ -1298,14 +1541,14 @@ def set_email_template():
 
 
 @app.route("/api/settings/email-subject")
-@login_required
+@tab_required_any('dashboard', 'admin')
 def get_email_subject():
     calendar = request.args.get("calendar", SCHEDULING_EMAIL)
     return jsonify({"subject": prep_subject_for(calendar)})
 
 
 @app.route("/api/settings/email-subject", methods=["POST"])
-@login_required
+@tab_required('admin')
 def set_email_subject():
     body = request.get_json()
     calendar = body.get("calendar", "")
@@ -1316,7 +1559,7 @@ def set_email_subject():
 
 
 @app.route("/api/deals/<deal_id>/send-prep-email", methods=["POST"])
-@login_required
+@tab_required('dashboard')
 def send_prep_email(deal_id):
     if not get_confirmed_meeting(deal_id):
         return jsonify({"error": "Complete Step 3 (add the team to the meeting invite) before sending the prep email"}), 400
@@ -1362,7 +1605,7 @@ def send_prep_email(deal_id):
 
 
 @app.route("/api/deals/<deal_id>/contact")
-@login_required
+@tab_required('dashboard')
 def get_deal_contact(deal_id):
     resp = requests.get(
         f"{BASE_URL}/crm/v4/objects/deals/{deal_id}/associations/contacts",
@@ -1394,14 +1637,14 @@ def get_deal_contact(deal_id):
 
 
 @app.route("/api/settings/handoff-email-template")
-@login_required
+@tab_required_any('dashboard', 'admin')
 def get_handoff_email_template():
     calendar = request.args.get("calendar", SCHEDULING_EMAIL)
     return jsonify({"template": handoff_template_for(calendar)})
 
 
 @app.route("/api/settings/handoff-email-template", methods=["POST"])
-@login_required
+@tab_required('admin')
 def set_handoff_email_template():
     body = request.get_json()
     calendar = body.get("calendar", "")
@@ -1412,14 +1655,14 @@ def set_handoff_email_template():
 
 
 @app.route("/api/settings/handoff-email-subject")
-@login_required
+@tab_required_any('dashboard', 'admin')
 def get_handoff_email_subject():
     calendar = request.args.get("calendar", SCHEDULING_EMAIL)
     return jsonify({"subject": handoff_subject_for(calendar)})
 
 
 @app.route("/api/settings/handoff-email-subject", methods=["POST"])
-@login_required
+@tab_required('admin')
 def set_handoff_email_subject():
     body = request.get_json()
     calendar = body.get("calendar", "")
@@ -1430,7 +1673,7 @@ def set_handoff_email_subject():
 
 
 @app.route("/api/deals/<deal_id>/send-handoff-email", methods=["POST"])
-@login_required
+@tab_required('dashboard')
 def send_handoff_email(deal_id):
     meeting = get_confirmed_meeting(deal_id)
     if not meeting:
@@ -1483,7 +1726,7 @@ def send_handoff_email(deal_id):
 
 
 @app.route("/api/clients/<client_value>", methods=["POST"])
-@login_required
+@tab_required('admin')
 def save_client(client_value):
     body = request.get_json()
     emails = [body.get(f"email{i}", "").strip() for i in range(1, 4)]
@@ -1511,7 +1754,7 @@ def save_client(client_value):
 
 
 @app.route("/api/clients/<client_value>/eligibility", methods=["POST"])
-@login_required
+@tab_required('admin')
 def set_client_eligibility(client_value):
     body = request.get_json()
     enabled = 1 if body.get("enabled") else 0
@@ -1525,7 +1768,7 @@ def set_client_eligibility(client_value):
 
 
 @app.route("/api/clients/<client_value>", methods=["GET"])
-@login_required
+@tab_required_any('dashboard', 'admin')
 def get_client(client_value):
     with get_db() as conn:
         row = conn.execute(
@@ -1822,13 +2065,13 @@ def build_flow_summary(flow_entry, detail):
 
 
 @app.route("/hs-workflows")
-@login_required
+@tab_required('hs_workflows')
 def hs_workflows_page():
     return render_template("hs_workflows.html")
 
 
 @app.route("/api/hs-workflows")
-@login_required
+@tab_required('hs_workflows')
 def api_hs_workflows():
     force = request.args.get("refresh") == "1"
     now_ts = datetime.now(timezone.utc).timestamp()
@@ -1870,7 +2113,7 @@ _HUBSPOT_OPTIONS_CACHE_TTL = 3600
 
 
 @app.route("/api/pull-contacts/hubspot-options")
-@login_required
+@tab_required('pull_contacts')
 def pull_contacts_hubspot_options():
     now_ts = datetime.now(timezone.utc).timestamp()
     if _HUBSPOT_OPTIONS_CACHE["data"] and (now_ts - _HUBSPOT_OPTIONS_CACHE["ts"] < _HUBSPOT_OPTIONS_CACHE_TTL):
@@ -2008,13 +2251,13 @@ def _refresh_hubspot_status(conn, batch_id):
 
 
 @app.route("/pull-contacts")
-@login_required
+@tab_required('pull_contacts')
 def pull_contacts_page():
     return render_template("pull_contacts.html")
 
 
 @app.route("/api/pull-contacts/searches")
-@login_required
+@tab_required('pull_contacts')
 def list_saved_searches():
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM saved_searches ORDER BY name").fetchall()
@@ -2025,7 +2268,7 @@ def list_saved_searches():
 
 
 @app.route("/api/pull-contacts/searches", methods=["POST"])
-@login_required
+@tab_required('pull_contacts')
 def save_search():
     body = request.get_json()
     name = (body.get("name") or "").strip()
@@ -2042,7 +2285,7 @@ def save_search():
 
 
 @app.route("/api/pull-contacts/searches/<int:search_id>", methods=["DELETE"])
-@login_required
+@tab_required('pull_contacts')
 def delete_saved_search(search_id):
     with get_db() as conn:
         conn.execute("DELETE FROM saved_searches WHERE id = ?", [search_id])
@@ -2050,7 +2293,7 @@ def delete_saved_search(search_id):
 
 
 @app.route("/api/pull-contacts/run", methods=["POST"])
-@login_required
+@tab_required('pull_contacts')
 def run_pull_search():
     body = request.get_json()
     criteria = body.get("criteria") or {}
@@ -2110,7 +2353,7 @@ def run_pull_search():
 
 
 @app.route("/api/pull-contacts/batches")
-@login_required
+@tab_required('pull_contacts')
 def list_pull_batches():
     with get_db() as conn:
         rows = conn.execute("""
@@ -2140,7 +2383,7 @@ def list_pull_batches():
 
 
 @app.route("/api/pull-contacts/batches/<int:batch_id>")
-@login_required
+@tab_required('pull_contacts')
 def get_pull_batch(batch_id):
     with get_db() as conn:
         batch = conn.execute("SELECT * FROM pull_batches WHERE id = ?", [batch_id]).fetchone()
@@ -2160,7 +2403,7 @@ def get_pull_batch(batch_id):
 
 
 @app.route("/api/pull-contacts/batches/<int:batch_id>/toggle", methods=["POST"])
-@login_required
+@tab_required('pull_contacts')
 def toggle_pull_candidates(batch_id):
     body = request.get_json()
     candidate_ids = body.get("candidate_ids") or []
@@ -2269,7 +2512,7 @@ def _run_enrich_batch(batch_id):
 
 
 @app.route("/api/pull-contacts/batches/<int:batch_id>/enrich", methods=["POST"])
-@login_required
+@tab_required('pull_contacts')
 def enrich_pull_batch(batch_id):
     with get_db() as conn:
         # Candidates pulled from an existing Apollo list may already be
@@ -2322,7 +2565,7 @@ def apollo_phone_webhook():
 
 
 @app.route("/api/pull-contacts/batches/<int:batch_id>/filter-incomplete", methods=["POST"])
-@login_required
+@tab_required('pull_contacts')
 def filter_incomplete_candidates(batch_id):
     body = request.get_json()
     required = body.get("require") or []  # subset of: email, mobile_phone, linkedin_url
@@ -2340,7 +2583,7 @@ def filter_incomplete_candidates(batch_id):
 
 
 @app.route("/api/pull-contacts/batches/<int:batch_id>/push", methods=["POST"])
-@login_required
+@tab_required('pull_contacts')
 def push_pull_batch(batch_id):
     body = request.get_json()
     sales_focus = body.get("sales_focus", "")

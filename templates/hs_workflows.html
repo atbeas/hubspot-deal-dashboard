@@ -104,11 +104,11 @@
     <p>Live visual map of every HubSpot automation workflow, pulled from the Automation API</p>
   </div>
   <div class="header-nav">
-    <a href="/pull-contacts" class="nav-link">Pull Contacts</a>
-    <a href="/" class="nav-link">← Deal Alloc</a>
+    {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
+    {% if current_user.is_owner or 'dashboard' in current_user.tabs %}<a href="/" class="nav-link">← Deal Alloc</a>{% endif %}
     <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
     <a href="/hs-workflows" class="nav-link active">HS Workflows</a>
-    <a href="/admin" class="nav-link">Admin</a>
+    {% if current_user.is_owner or 'admin' in current_user.tabs %}<a href="/admin" class="nav-link">Admin</a>{% endif %}
     <a href="/logout" class="nav-link">Log Out</a>
   </div>
 </header>
