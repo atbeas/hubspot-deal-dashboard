@@ -814,9 +814,25 @@
     // Search active + archived deals for the same date range so a meeting
     // that's still on the calendar but whose deal got archived can still
     // surface its Client/AM/SE instead of showing as unlinked.
-    const candidateDeals = allDeals.concat(otherBucketDeals);
+    const candidateDeals = allDeals.concat(otherBucketDeals).filter(o => o.id !== d.id);
+    // Every other loaded deal whose OWN meeting time matches this exact slot,
+    // independent of whether it could win the Step-3 auto-suggest tie-break
+    // against the other same-time meeting(s) — that tie-break (company-name
+    // match) frequently can't disambiguate when 2+ meetings share a
+    // timestamp, which is exactly what a real double-booking looks like, so
+    // relying on it here was hiding names on precisely the conflicts that
+    // most needed flagging.
+    const dealsAtThisTime = candidateDeals.filter(o => getDealMeetingStart(o) === myStart);
+    const claimed = new Set();
     return others.map(m => {
-      const otherDeal = candidateDeals.find(o => o.id !== d.id && getDealMeetingId(o) === m.id);
+      // Prefer a deal whose confirmed/suggested pick resolves to this exact
+      // calendar event; otherwise fall back to any other same-time deal not
+      // already attached to a different conflict line above — still correct
+      // about WHO is booked at this time even when it can't be certain WHICH
+      // literal calendar entry that deal's meeting corresponds to.
+      const otherDeal = dealsAtThisTime.find(o => !claimed.has(o.id) && getDealMeetingId(o) === m.id)
+        || dealsAtThisTime.find(o => !claimed.has(o.id));
+      if (otherDeal) claimed.add(otherDeal.id);
       const roleMatches = otherDeal
         ? Object.keys(CONFLICT_ROLE_LABELS).filter(role => d[role] && otherDeal[role] && d[role] === otherDeal[role])
         : [];
