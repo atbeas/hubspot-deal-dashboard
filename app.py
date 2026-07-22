@@ -37,6 +37,10 @@ AB_MSP_CADENCE_NAME = "LI Apollo HS Prospect Cadence for Runway Selling"
 AB_MSP_APOLLO_LIST_ID = "6a5587cb13bab7002047c0db"
 AB_MSP_SEQUENCE_ID = "307993448"
 AB_MSP_SENDER_EMAIL = "andrew@runwayselling.com"
+# HubSpot's Sequences API needs the sender's real HubSpot *user* id, not the
+# CRM owner id -- confirmed live 2026-07-22 (owner id 696485290 403s, the
+# actual userId 57847838 from GET /crm/v3/owners/696485290 works).
+AB_MSP_SENDER_USER_ID = "57847838"
 PULL_CONTACTS_CRON_SECRET = os.environ.get("PULL_CONTACTS_CRON_SECRET", "")
 
 def get_db():
@@ -151,6 +155,7 @@ def init_db():
             ("default_sales_focus", "TEXT DEFAULT ''"),
             ("sequence_id", "TEXT DEFAULT ''"),
             ("sequence_sender_email", "TEXT DEFAULT ''"),
+            ("sequence_sender_user_id", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE saved_searches ADD COLUMN {col} {ddl}")
@@ -237,11 +242,18 @@ def init_db():
             conn.execute("""
                 INSERT INTO saved_searches
                     (name, criteria_json, created_at, is_daily_watch, default_sales_focus,
-                     sequence_id, sequence_sender_email)
-                VALUES (?, ?, ?, 1, ?, ?, ?)
+                     sequence_id, sequence_sender_email, sequence_sender_user_id)
+                VALUES (?, ?, ?, 1, ?, ?, ?, ?)
             """, [AB_MSP_CADENCE_NAME, json.dumps({"apollo_list_id": AB_MSP_APOLLO_LIST_ID}),
                   datetime.now(timezone.utc).isoformat(), "Runway Selling",
-                  AB_MSP_SEQUENCE_ID, AB_MSP_SENDER_EMAIL])
+                  AB_MSP_SEQUENCE_ID, AB_MSP_SENDER_EMAIL, AB_MSP_SENDER_USER_ID])
+        else:
+            # Backfill sequence_sender_user_id on the already-seeded row --
+            # this column was added after the cadence row first existed.
+            conn.execute(
+                "UPDATE saved_searches SET sequence_sender_user_id = ? WHERE name = ? AND sequence_sender_user_id = ''",
+                [AB_MSP_SENDER_USER_ID, AB_MSP_CADENCE_NAME]
+            )
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS app_users (
@@ -2835,10 +2847,12 @@ def push_pull_batch(batch_id):
 
         sequence_enrolled = 0
         sequence_errors = []
-        if saved_search and saved_search["sequence_id"] and saved_search["sequence_sender_email"] and pushed_candidate_hs_ids:
+        if (saved_search and saved_search["sequence_id"] and saved_search["sequence_sender_email"]
+                and saved_search["sequence_sender_user_id"] and pushed_candidate_hs_ids):
             enroll_result = apollo.enroll_contacts_in_sequence(
                 [hs_id for _, hs_id in pushed_candidate_hs_ids],
-                saved_search["sequence_id"], saved_search["sequence_sender_email"]
+                saved_search["sequence_id"], saved_search["sequence_sender_email"],
+                saved_search["sequence_sender_user_id"]
             )
             enrolled_set = set(enroll_result["enrolled"])
             sequence_errors = enroll_result["errors"]

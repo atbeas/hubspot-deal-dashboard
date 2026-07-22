@@ -382,14 +382,17 @@ def check_hubspot_existence(emails):
     return found
 
 
-def enroll_contact_in_sequence(contact_id, sequence_id, sender_email):
+def enroll_contact_in_sequence(contact_id, sequence_id, sender_email, sender_user_id):
     """Enrolls one contact into a HubSpot Sequence. senderEmail must be a
-    connected inbox on a paid Sales/Service Hub seat -- confirmed live
-    2026-07-22 that the API requires this even though it's not obvious from
-    contact_id/sequence_id alone. One contact per call (no documented batch
-    endpoint as of this build).
+    connected inbox on a paid Sales/Service Hub seat. sender_user_id is the
+    HubSpot user id (NOT the CRM owner id -- confirmed live 2026-07-22 that
+    an owner id 403s here) of that same sender, required as a `userId` query
+    param -- omitting it 400s with "query param userId may not be null",
+    the same undocumented quirk as reading a sequence via GET. One contact
+    per call (no documented batch endpoint as of this build).
     """
     resp = requests.post(f"{HUBSPOT_BASE}/automation/sequences/2026-03/enrollments",
+                          params={"userId": sender_user_id},
                           headers=_hubspot_headers(),
                           json={"sequenceId": str(sequence_id), "contactId": str(contact_id),
                                 "senderEmail": sender_email},
@@ -401,11 +404,11 @@ def enroll_contact_in_sequence(contact_id, sequence_id, sender_email):
     return resp.ok, data
 
 
-def enroll_contacts_in_sequence(contact_ids, sequence_id, sender_email):
+def enroll_contacts_in_sequence(contact_ids, sequence_id, sender_email, sender_user_id):
     enrolled = []
     errors = []
     for contact_id in contact_ids:
-        ok, data = enroll_contact_in_sequence(contact_id, sequence_id, sender_email)
+        ok, data = enroll_contact_in_sequence(contact_id, sequence_id, sender_email, sender_user_id)
         if ok:
             enrolled.append(contact_id)
         else:
