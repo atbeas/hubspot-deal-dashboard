@@ -29,6 +29,16 @@ TAB_KEYS = [key for key, _ in TAB_DEFS]
 
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", os.path.dirname(__file__)), "client_contacts.db")
 
+# "LI Apollo HS Prospect Cadence for Runway Selling" -- daily watch of the
+# Apollo "AB MSPs" list (id confirmed live via GET /v1/labels 2026-07-22),
+# always tagged sales_focus=Runway Selling, auto-enrolled into the
+# "AB MSP Value_260722" HubSpot Sequence on push.
+AB_MSP_CADENCE_NAME = "LI Apollo HS Prospect Cadence for Runway Selling"
+AB_MSP_APOLLO_LIST_ID = "6a5587cb13bab7002047c0db"
+AB_MSP_SEQUENCE_ID = "307993448"
+AB_MSP_SENDER_EMAIL = "andrew@runwayselling.com"
+PULL_CONTACTS_CRON_SECRET = os.environ.get("PULL_CONTACTS_CRON_SECRET", "")
+
 def get_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -132,6 +142,20 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+        # Cadence fields: a saved search tied to a stable Apollo list (not a
+        # net-new ICP search) can be marked as a daily watch, always tag a
+        # fixed sales_focus regardless of what the Tag & Push dropdown was
+        # left at, and auto-enroll pushed contacts into a HubSpot Sequence.
+        for col, ddl in [
+            ("is_daily_watch", "INTEGER DEFAULT 0"),
+            ("default_sales_focus", "TEXT DEFAULT ''"),
+            ("sequence_id", "TEXT DEFAULT ''"),
+            ("sequence_sender_email", "TEXT DEFAULT ''"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE saved_searches ADD COLUMN {col} {ddl}")
+            except sqlite3.OperationalError:
+                pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS pull_batches (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,6 +167,10 @@ def init_db():
         """)
         try:
             conn.execute("ALTER TABLE pull_batches ADD COLUMN total_entries INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE pull_batches ADD COLUMN saved_search_id INTEGER")
         except sqlite3.OperationalError:
             pass
         conn.execute("""
@@ -181,6 +209,14 @@ def init_db():
             conn.execute("ALTER TABLE pull_candidates ADD COLUMN hubspot_status TEXT NOT NULL DEFAULT 'unknown'")
         except sqlite3.OperationalError:
             pass
+        for col, ddl in [
+            ("sequence_status", "TEXT DEFAULT ''"),
+            ("sequence_enrolled_at", "TEXT"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE pull_candidates ADD COLUMN {col} {ddl}")
+            except sqlite3.OperationalError:
+                pass
         existing = conn.execute("SELECT COUNT(*) c FROM saved_searches").fetchone()["c"]
         if existing == 0:
             conn.execute(
@@ -194,6 +230,18 @@ def init_db():
                     "keyword_tags": ["managed service provider"],
                 }), datetime.now(timezone.utc).isoformat()]
             )
+        cadence_existing = conn.execute(
+            "SELECT id FROM saved_searches WHERE name = ?", [AB_MSP_CADENCE_NAME]
+        ).fetchone()
+        if not cadence_existing:
+            conn.execute("""
+                INSERT INTO saved_searches
+                    (name, criteria_json, created_at, is_daily_watch, default_sales_focus,
+                     sequence_id, sequence_sender_email)
+                VALUES (?, ?, ?, 1, ?, ?, ?)
+            """, [AB_MSP_CADENCE_NAME, json.dumps({"apollo_list_id": AB_MSP_APOLLO_LIST_ID}),
+                  datetime.now(timezone.utc).isoformat(), "Runway Selling",
+                  AB_MSP_SEQUENCE_ID, AB_MSP_SENDER_EMAIL])
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS app_users (
@@ -2191,6 +2239,8 @@ def _candidate_row_to_dict(row):
         "hubspot_contact_id": row["hubspot_contact_id"],
         "pushed_at": row["pushed_at"],
         "hubspot_status": row["hubspot_status"],
+        "sequence_status": row["sequence_status"],
+        "sequence_enrolled_at": row["sequence_enrolled_at"],
     }
 
 
@@ -2323,12 +2373,27 @@ def delete_saved_search(search_id):
     return jsonify({"ok": True})
 
 
+def _saved_search_cadence_info(row):
+    if not row:
+        return None
+    if not (row["default_sales_focus"] or row["sequence_id"]):
+        return None
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "default_sales_focus": row["default_sales_focus"] or "",
+        "sequence_id": row["sequence_id"] or "",
+        "sequence_sender_email": row["sequence_sender_email"] or "",
+    }
+
+
 @app.route("/api/pull-contacts/run", methods=["POST"])
 @tab_required('pull_contacts')
 def run_pull_search():
     body = request.get_json()
     criteria = body.get("criteria") or {}
     search_name = body.get("search_name", "")
+    search_id = body.get("search_id") or None
 
     if criteria.get("apollo_list_id"):
         result = apollo.pull_apollo_list(criteria["apollo_list_id"])
@@ -2337,8 +2402,8 @@ def run_pull_search():
 
     with get_db() as conn:
         cur = conn.execute(
-            "INSERT INTO pull_batches (search_name, criteria_json, stage, created_at, total_entries) VALUES (?, ?, 'scrubbing', ?, ?)",
-            [search_name, json.dumps(criteria), datetime.now(timezone.utc).isoformat(), result["total_entries"]]
+            "INSERT INTO pull_batches (search_name, criteria_json, stage, created_at, total_entries, saved_search_id) VALUES (?, ?, 'scrubbing', ?, ?, ?)",
+            [search_name, json.dumps(criteria), datetime.now(timezone.utc).isoformat(), result["total_entries"], search_id]
         )
         batch_id = cur.lastrowid
 
@@ -2374,13 +2439,114 @@ def run_pull_search():
         _refresh_hubspot_status(conn, batch_id)
         rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
         candidates = _attach_prior_pull_info(conn, [_candidate_row_to_dict(r) for r in rows], batch_id)
+        search_row = conn.execute("SELECT * FROM saved_searches WHERE id = ?", [search_id]).fetchone() if search_id else None
 
     return jsonify({
         "batch_id": batch_id,
         "total_entries": result["total_entries"],
         "truncated": result.get("truncated", False),
         "candidates": candidates,
+        "cadence": _saved_search_cadence_info(search_row),
     })
+
+
+def _get_all_seen_person_ids_for_search(conn, saved_search_id):
+    """Every apollo_person_id ever pulled into ANY batch tied to this saved
+    search -- used by the daily watch to isolate genuinely new list members,
+    which is a stronger check than the 6-month no-repeat-pull window used
+    elsewhere (a daily cadence should never re-surface someone already seen,
+    regardless of how long ago).
+    """
+    rows = conn.execute("""
+        SELECT DISTINCT pc.apollo_person_id
+        FROM pull_candidates pc
+        JOIN pull_batches pb ON pb.id = pc.batch_id
+        WHERE pb.saved_search_id = ?
+    """, [saved_search_id]).fetchall()
+    return {r["apollo_person_id"] for r in rows}
+
+
+def _run_daily_pull(conn, search):
+    search_id = search["id"]
+    criteria = json.loads(search["criteria_json"])
+    list_id = criteria.get("apollo_list_id")
+    if not list_id:
+        return {"error": "saved search has no apollo_list_id"}, 400
+
+    result = apollo.pull_apollo_list(list_id)
+    seen_ids = _get_all_seen_person_ids_for_search(conn, search_id)
+    new_candidates = [c for c in result["candidates"] if c["apollo_person_id"] not in seen_ids]
+
+    if not new_candidates:
+        return {"batch_id": None, "new_count": 0, "message": "No new prospects since last pull"}, 200
+
+    cur = conn.execute(
+        "INSERT INTO pull_batches (search_name, criteria_json, stage, created_at, total_entries, saved_search_id) VALUES (?, ?, 'scrubbing', ?, ?, ?)",
+        [search["name"], search["criteria_json"], datetime.now(timezone.utc).isoformat(),
+         len(new_candidates), search_id]
+    )
+    batch_id = cur.lastrowid
+
+    for c in new_candidates:
+        email = c.get("email", "")
+        mobile_phone = c.get("mobile_phone", "")
+        conn.execute("""
+            INSERT INTO pull_candidates
+                (batch_id, apollo_person_id, apollo_contact_id, organization_id,
+                 first_name, last_name, title, company_name, keep,
+                 email, email_status, linkedin_url, enrich_status,
+                 mobile_phone, mobile_status,
+                 company_phone, website, company_linkedin_url, city, state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [batch_id, c["apollo_person_id"], c.get("apollo_contact_id"), c.get("organization_id"),
+              c["first_name"], c["last_name"], c["title"], c["company_name"],
+              email, c.get("email_status", ""), c.get("linkedin_url", ""), "done" if email else "pending",
+              mobile_phone, "found" if mobile_phone else "pending",
+              c.get("company_phone", ""), c.get("website", ""), c.get("company_linkedin_url", ""),
+              c.get("city", ""), c.get("state", "")])
+    _refresh_hubspot_status(conn, batch_id)
+    return {"batch_id": batch_id, "new_count": len(new_candidates)}, 200
+
+
+@app.route("/api/pull-contacts/searches/by-name/<string:name>/daily-pull", methods=["POST"])
+def daily_pull_search_by_name(name):
+    """Same as daily_pull_search below, resolved by saved-search NAME instead
+    of numeric id -- used by the Railway Cron Job so its command doesn't
+    have to hardcode an auto-increment id that doesn't exist until the app's
+    first deploy seeds the row.
+    """
+    if not PULL_CONTACTS_CRON_SECRET or request.headers.get("X-Cron-Secret") != PULL_CONTACTS_CRON_SECRET:
+        return jsonify({"error": "forbidden"}), 403
+    with get_db() as conn:
+        search = conn.execute("SELECT * FROM saved_searches WHERE name = ?", [name]).fetchone()
+        if not search:
+            return jsonify({"error": "saved search not found"}), 404
+        if not search["is_daily_watch"]:
+            return jsonify({"error": "this saved search is not marked as a daily watch"}), 400
+        body, status = _run_daily_pull(conn, search)
+    return jsonify(body), status
+
+
+@app.route("/api/pull-contacts/searches/<int:search_id>/daily-pull", methods=["POST"])
+def daily_pull_search(search_id):
+    """Cron entry point (Railway Cron Job, not a logged-in user) -- pulls a
+    daily-watch saved search's Apollo list and stages ONLY the members never
+    seen before in a new batch, landing on the normal Scrub screen for
+    Andrew's review/enrich/approve-and-push, same as a manual pull. No
+    HubSpot write happens here -- that only happens if/when a human pushes
+    the resulting batch.
+    """
+    if not PULL_CONTACTS_CRON_SECRET or request.headers.get("X-Cron-Secret") != PULL_CONTACTS_CRON_SECRET:
+        return jsonify({"error": "forbidden"}), 403
+
+    with get_db() as conn:
+        search = conn.execute("SELECT * FROM saved_searches WHERE id = ?", [search_id]).fetchone()
+        if not search:
+            return jsonify({"error": "saved search not found"}), 404
+        if not search["is_daily_watch"]:
+            return jsonify({"error": "this saved search is not marked as a daily watch"}), 400
+        body, status = _run_daily_pull(conn, search)
+    return jsonify(body), status
 
 
 @app.route("/api/pull-contacts/batches")
@@ -2423,6 +2589,9 @@ def get_pull_batch(batch_id):
         _refresh_hubspot_status(conn, batch_id)
         rows = conn.execute("SELECT * FROM pull_candidates WHERE batch_id = ?", [batch_id]).fetchall()
         candidates = _attach_prior_pull_info(conn, [_candidate_row_to_dict(r) for r in rows], batch_id)
+        search_row = None
+        if batch["saved_search_id"]:
+            search_row = conn.execute("SELECT * FROM saved_searches WHERE id = ?", [batch["saved_search_id"]]).fetchone()
     return jsonify({
         "batch_id": batch_id,
         "stage": batch["stage"],
@@ -2430,6 +2599,7 @@ def get_pull_batch(batch_id):
         "criteria": json.loads(batch["criteria_json"]) if batch["criteria_json"] else {},
         "total_entries": batch["total_entries"] or 0,
         "candidates": candidates,
+        "cadence": _saved_search_cadence_info(search_row),
     })
 
 
@@ -2625,6 +2795,18 @@ def push_pull_batch(batch_id):
     task_due_iso = body.get("task_due_iso") or datetime.now(timezone.utc).isoformat()
 
     with get_db() as conn:
+        batch = conn.execute("SELECT * FROM pull_batches WHERE id = ?", [batch_id]).fetchone()
+        saved_search = None
+        if batch and batch["saved_search_id"]:
+            saved_search = conn.execute(
+                "SELECT * FROM saved_searches WHERE id = ?", [batch["saved_search_id"]]
+            ).fetchone()
+        # A cadence's own default_sales_focus always wins over whatever the
+        # Tag & Push dropdown was left at -- guarantees e.g. the AB MSPs
+        # cadence always tags Runway Selling regardless of operator error.
+        if saved_search and saved_search["default_sales_focus"]:
+            sales_focus = saved_search["default_sales_focus"]
+
         rows = conn.execute(
             "SELECT * FROM pull_candidates WHERE batch_id = ? AND keep = 1", [batch_id]
         ).fetchall()
@@ -2635,6 +2817,7 @@ def push_pull_batch(batch_id):
 
         pushed_at = datetime.now(timezone.utc).isoformat()
         contact_ids_with_state = []
+        pushed_candidate_hs_ids = []
         for c in candidates:
             email = (c.get("email") or "").lower()
             hs_id = id_by_email.get(email)
@@ -2644,16 +2827,37 @@ def push_pull_batch(batch_id):
                     [hs_id, pushed_at, c["id"]]
                 )
                 contact_ids_with_state.append((hs_id, c["state"]))
+                pushed_candidate_hs_ids.append((c["id"], hs_id))
 
         task_ids = []
         if create_tasks and owner_id and contact_ids_with_state:
             task_ids = apollo.create_call_tasks(contact_ids_with_state, owner_id, task_due_iso)
+
+        sequence_enrolled = 0
+        sequence_errors = []
+        if saved_search and saved_search["sequence_id"] and saved_search["sequence_sender_email"] and pushed_candidate_hs_ids:
+            enroll_result = apollo.enroll_contacts_in_sequence(
+                [hs_id for _, hs_id in pushed_candidate_hs_ids],
+                saved_search["sequence_id"], saved_search["sequence_sender_email"]
+            )
+            enrolled_set = set(enroll_result["enrolled"])
+            sequence_errors = enroll_result["errors"]
+            sequence_enrolled = len(enrolled_set)
+            enrolled_at = datetime.now(timezone.utc).isoformat()
+            for cand_id, hs_id in pushed_candidate_hs_ids:
+                status = "enrolled" if hs_id in enrolled_set else "failed"
+                conn.execute(
+                    "UPDATE pull_candidates SET sequence_status = ?, sequence_enrolled_at = ? WHERE id = ?",
+                    [status, enrolled_at if status == "enrolled" else None, cand_id]
+                )
 
         conn.execute("UPDATE pull_batches SET stage = 'pushed' WHERE id = ?", [batch_id])
 
     return jsonify({
         "pushed": len(contact_ids_with_state),
         "tasks_created": len(task_ids),
+        "sequence_enrolled": sequence_enrolled,
+        "sequence_errors": sequence_errors,
     })
 
 

@@ -259,6 +259,7 @@
     <!-- Stage 4: Push -->
     <div class="panel" id="panelPush" style="display:none">
       <div class="panel-title">④ Tag &amp; push to HubSpot</div>
+      <div id="cadenceNote" style="display:none"></div>
       <div class="summary-strip" id="pushSeenSummary"></div>
       <div class="field-grid">
         <div class="field">
@@ -298,6 +299,8 @@
 <script>
 let currentBatchId = null;
 let currentCandidates = [];
+let currentSearchId = null;
+let currentCadence = null;
 let savedSearches = [];
 let enrichPollTimer = null;
 const LAST_BATCH_KEY = 'pc_active_batch_id';
@@ -403,6 +406,7 @@ function selectSavedSearch(id) {
   document.querySelectorAll('.rail-item').forEach(el => el.classList.toggle('active', el.dataset.id == id));
   document.getElementById('fSearchName').value = s.name;
   fillCriteriaForm(s.criteria);
+  currentSearchId = id;
   setStage('define');
 }
 
@@ -418,6 +422,8 @@ document.getElementById('newSearchBtn').addEventListener('click', () => {
   fillCriteriaForm({});
   currentBatchId = null;
   currentCandidates = [];
+  currentSearchId = null;
+  currentCadence = null;
   localStorage.removeItem(LAST_BATCH_KEY);
   maxStageReached = 'define';
   setStage('define');
@@ -449,6 +455,7 @@ async function resumeBatch(id) {
   const data = await resp.json();
   currentBatchId = data.batch_id;
   currentCandidates = data.candidates;
+  currentCadence = data.cadence || null;
   localStorage.setItem(LAST_BATCH_KEY, id);
 
   document.querySelectorAll('#pastPullsList .rail-item').forEach(el => el.classList.toggle('active', el.dataset.batchId == id));
@@ -488,11 +495,16 @@ document.getElementById('runSearchBtn').addEventListener('click', async () => {
   try {
     const resp = await fetch('/api/pull-contacts/run', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({criteria: collectCriteria(), search_name: document.getElementById('fSearchName').value.trim()})
+      body: JSON.stringify({
+        criteria: collectCriteria(),
+        search_name: document.getElementById('fSearchName').value.trim(),
+        search_id: currentSearchId,
+      })
     });
     const data = await resp.json();
     currentBatchId = data.batch_id;
     currentCandidates = data.candidates;
+    currentCadence = data.cadence || null;
     localStorage.setItem(LAST_BATCH_KEY, data.batch_id);
     document.getElementById('totalFound').textContent = data.total_entries;
     document.getElementById('totalShown').textContent = data.candidates.length;
@@ -681,6 +693,22 @@ async function preparePushPanel() {
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     document.getElementById('fTaskDue').value = now.toISOString().slice(0, 16);
   }
+
+  const focusSel = document.getElementById('fSalesFocus');
+  const cadenceNote = document.getElementById('cadenceNote');
+  if (currentCadence && currentCadence.default_sales_focus) {
+    focusSel.value = currentCadence.default_sales_focus;
+    focusSel.disabled = true;
+    const seqLine = currentCadence.sequence_id
+      ? ` Approved contacts will be enrolled in HubSpot Sequence ${esc(currentCadence.sequence_id)} from ${esc(currentCadence.sequence_sender_email)}.`
+      : '';
+    cadenceNote.innerHTML = `<div class="result-banner" style="margin-bottom:14px">🔒 "${esc(currentCadence.name)}" always tags <b>${esc(currentCadence.default_sales_focus)}</b> — locked, not editable here.${seqLine}</div>`;
+    cadenceNote.style.display = '';
+  } else {
+    focusSel.disabled = false;
+    cadenceNote.style.display = 'none';
+  }
+
   renderPushSummary();
 }
 
@@ -707,8 +735,12 @@ document.getElementById('pushBtn').addEventListener('click', async () => {
       })
     });
     const data = await resp.json();
+    const seqLine = currentCadence && currentCadence.sequence_id
+      ? ` ${data.sequence_enrolled} enrolled in the Sequence${data.sequence_errors && data.sequence_errors.length ? `, ${data.sequence_errors.length} failed to enroll (see console)` : ''}.`
+      : '';
+    if (data.sequence_errors && data.sequence_errors.length) console.warn('Sequence enrollment errors:', data.sequence_errors);
     document.getElementById('pushResult').innerHTML = `
-      <div class="result-banner">✓ Pushed ${data.pushed} contact(s) to HubSpot${data.tasks_created ? ` and created ${data.tasks_created} follow-up task(s)` : ''}.</div>
+      <div class="result-banner">✓ Pushed ${data.pushed} contact(s) to HubSpot${data.tasks_created ? ` and created ${data.tasks_created} follow-up task(s)` : ''}.${seqLine}</div>
     `;
     loadPastBatches();
   } finally {

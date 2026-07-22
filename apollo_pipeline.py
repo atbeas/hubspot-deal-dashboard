@@ -382,6 +382,37 @@ def check_hubspot_existence(emails):
     return found
 
 
+def enroll_contact_in_sequence(contact_id, sequence_id, sender_email):
+    """Enrolls one contact into a HubSpot Sequence. senderEmail must be a
+    connected inbox on a paid Sales/Service Hub seat -- confirmed live
+    2026-07-22 that the API requires this even though it's not obvious from
+    contact_id/sequence_id alone. One contact per call (no documented batch
+    endpoint as of this build).
+    """
+    resp = requests.post(f"{HUBSPOT_BASE}/automation/sequences/2026-03/enrollments",
+                          headers=_hubspot_headers(),
+                          json={"sequenceId": str(sequence_id), "contactId": str(contact_id),
+                                "senderEmail": sender_email},
+                          timeout=30)
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {"raw": resp.text[:300]}
+    return resp.ok, data
+
+
+def enroll_contacts_in_sequence(contact_ids, sequence_id, sender_email):
+    enrolled = []
+    errors = []
+    for contact_id in contact_ids:
+        ok, data = enroll_contact_in_sequence(contact_id, sequence_id, sender_email)
+        if ok:
+            enrolled.append(contact_id)
+        else:
+            errors.append({"contact_id": contact_id, "error": data})
+    return {"enrolled": enrolled, "errors": errors}
+
+
 def create_call_tasks(contact_ids_with_state, owner_id, due_timestamp_iso, task_label="Task 1"):
     """One CALL task per contact: 'MSP | {State} | {task_label}', associated
     to the contact at creation time (associationTypeId 204).
