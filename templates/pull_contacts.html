@@ -670,7 +670,7 @@ async function loadHubspotOptions() {
 async function loadOwners() {
   const resp = await fetch('/api/owners');
   const data = await resp.json();
-  document.getElementById('fOwner').innerHTML = sortByLabel(data.owners, 'name').map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
+  document.getElementById('fOwner').innerHTML = sortByLabel(data.owners, 'name').map(o => `<option value="${o.id}">${esc(o.name)}${o.email ? ' — ' + esc(o.email) : ''}</option>`).join('');
 }
 
 function renderPushSummary() {
