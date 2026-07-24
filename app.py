@@ -41,6 +41,7 @@ AB_MSP_SENDER_EMAIL = "andrew@runwayselling.com"
 # CRM owner id -- confirmed live 2026-07-22 (owner id 696485290 403s, the
 # actual userId 57847838 from GET /crm/v3/owners/696485290 works).
 AB_MSP_SENDER_USER_ID = "57847838"
+AB_MSP_SENDER_OWNER_ID = "696485290"  # Andrew Beasley -- see reference_hubspot_owners memory
 PULL_CONTACTS_CRON_SECRET = os.environ.get("PULL_CONTACTS_CRON_SECRET", "")
 
 def get_db():
@@ -156,6 +157,7 @@ def init_db():
             ("sequence_id", "TEXT DEFAULT ''"),
             ("sequence_sender_email", "TEXT DEFAULT ''"),
             ("sequence_sender_user_id", "TEXT DEFAULT ''"),
+            ("sequence_sender_owner_id", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE saved_searches ADD COLUMN {col} {ddl}")
@@ -243,17 +245,20 @@ def init_db():
             conn.execute("""
                 INSERT INTO saved_searches
                     (name, criteria_json, created_at, is_daily_watch, default_sales_focus,
-                     sequence_id, sequence_sender_email, sequence_sender_user_id)
-                VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+                     sequence_id, sequence_sender_email, sequence_sender_user_id, sequence_sender_owner_id)
+                VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)
             """, [AB_MSP_CADENCE_NAME, json.dumps({"apollo_list_id": AB_MSP_APOLLO_LIST_ID}),
                   datetime.now(timezone.utc).isoformat(), "Runway Selling",
-                  AB_MSP_SEQUENCE_ID, AB_MSP_SENDER_EMAIL, AB_MSP_SENDER_USER_ID])
+                  AB_MSP_SEQUENCE_ID, AB_MSP_SENDER_EMAIL, AB_MSP_SENDER_USER_ID, AB_MSP_SENDER_OWNER_ID])
         else:
-            # Backfill sequence_sender_user_id on the already-seeded row --
-            # this column was added after the cadence row first existed.
+            # Backfill columns added after the cadence row first existed.
             conn.execute(
                 "UPDATE saved_searches SET sequence_sender_user_id = ? WHERE name = ? AND sequence_sender_user_id = ''",
                 [AB_MSP_SENDER_USER_ID, AB_MSP_CADENCE_NAME]
+            )
+            conn.execute(
+                "UPDATE saved_searches SET sequence_sender_owner_id = ? WHERE name = ? AND sequence_sender_owner_id = ''",
+                [AB_MSP_SENDER_OWNER_ID, AB_MSP_CADENCE_NAME]
             )
 
         conn.execute("""
@@ -672,6 +677,7 @@ def fetch_hubspot_owners():
                         "id":    str(o["id"]),
                         "name":  name,
                         "email": o.get("email", ""),
+                        "user_id": str(o["userId"]) if o.get("userId") else "",
                     })
         after = data.get("paging", {}).get("next", {}).get("after")
         if not after:
@@ -2222,6 +2228,45 @@ def pull_contacts_hubspot_options():
     return jsonify(result)
 
 
+_SEQUENCES_CACHE = {"data": None, "ts": 0}
+_SEQUENCES_CACHE_TTL = 3600
+# Listing sequences requires a userId query param (same undocumented quirk
+# as reading/enrolling -- see reference_hubspot_sequences_api memory) but,
+# confirmed live, it returns every sequence portal-wide regardless of whose
+# id is passed -- it's just an "acting as" requirement, not a visibility
+# filter. Andrew's userId works fine as a fixed value for listing purposes.
+SEQUENCES_LIST_USER_ID = AB_MSP_SENDER_USER_ID
+
+
+@app.route("/api/pull-contacts/sequences")
+@tab_required('pull_contacts')
+def pull_contacts_sequences():
+    now_ts = datetime.now(timezone.utc).timestamp()
+    if _SEQUENCES_CACHE["data"] and (now_ts - _SEQUENCES_CACHE["ts"] < _SEQUENCES_CACHE_TTL):
+        return jsonify({"sequences": _SEQUENCES_CACHE["data"]})
+
+    sequences = []
+    after = None
+    while True:
+        params = {"limit": 100, "userId": SEQUENCES_LIST_USER_ID}
+        if after:
+            params["after"] = after
+        resp = requests.get(f"{BASE_URL}/automation/v4/sequences", headers=HEADERS, params=params)
+        if not resp.ok:
+            break
+        data = resp.json()
+        for s in data.get("results", []):
+            sequences.append({"id": str(s["id"]), "name": s.get("name", "")})
+        after = data.get("paging", {}).get("next", {}).get("after")
+        if not after:
+            break
+    sequences.sort(key=lambda s: s["name"].lower())
+
+    _SEQUENCES_CACHE["data"] = sequences
+    _SEQUENCES_CACHE["ts"] = now_ts
+    return jsonify({"sequences": sequences})
+
+
 def _candidate_row_to_dict(row):
     return {
         "id": row["id"],
@@ -2415,6 +2460,7 @@ def _saved_search_cadence_info(row):
         "default_sales_focus": row["default_sales_focus"] or "",
         "sequence_id": row["sequence_id"] or "",
         "sequence_sender_email": row["sequence_sender_email"] or "",
+        "sequence_sender_owner_id": row["sequence_sender_owner_id"] or "",
     }
 
 
@@ -2824,6 +2870,12 @@ def push_pull_batch(batch_id):
     owner_id = body.get("owner_id") or None
     create_tasks = bool(body.get("create_tasks"))
     task_due_iso = body.get("task_due_iso") or datetime.now(timezone.utc).isoformat()
+    # Contact Owner, Sequence Sender, and Task Assignee are three
+    # independently selectable people -- task_owner_id falls back to the
+    # contact owner if left blank (matches the old single-owner behavior).
+    task_owner_id = body.get("task_owner_id") or owner_id
+    sequence_id = body.get("sequence_id") or None
+    sequence_sender_owner_id = body.get("sequence_sender_owner_id") or None
 
     with get_db() as conn:
         batch = conn.execute("SELECT * FROM pull_batches WHERE id = ?", [batch_id]).fetchone()
@@ -2861,28 +2913,30 @@ def push_pull_batch(batch_id):
                 pushed_candidate_hs_ids.append((c["id"], hs_id))
 
         task_ids = []
-        if create_tasks and owner_id and contact_ids_with_state:
-            task_ids = apollo.create_call_tasks(contact_ids_with_state, owner_id, task_due_iso)
+        if create_tasks and task_owner_id and contact_ids_with_state:
+            task_ids = apollo.create_call_tasks(contact_ids_with_state, task_owner_id, task_due_iso)
 
         sequence_enrolled = 0
         sequence_errors = []
-        if (saved_search and saved_search["sequence_id"] and saved_search["sequence_sender_email"]
-                and saved_search["sequence_sender_user_id"] and pushed_candidate_hs_ids):
-            enroll_result = apollo.enroll_contacts_in_sequence(
-                [hs_id for _, hs_id in pushed_candidate_hs_ids],
-                saved_search["sequence_id"], saved_search["sequence_sender_email"],
-                saved_search["sequence_sender_user_id"]
-            )
-            enrolled_set = set(enroll_result["enrolled"])
-            sequence_errors = enroll_result["errors"]
-            sequence_enrolled = len(enrolled_set)
-            enrolled_at = datetime.now(timezone.utc).isoformat()
-            for cand_id, hs_id in pushed_candidate_hs_ids:
-                status = "enrolled" if hs_id in enrolled_set else "failed"
-                conn.execute(
-                    "UPDATE pull_candidates SET sequence_status = ?, sequence_enrolled_at = ? WHERE id = ?",
-                    [status, enrolled_at if status == "enrolled" else None, cand_id]
+        if sequence_id and sequence_sender_owner_id and pushed_candidate_hs_ids:
+            sender = next((o for o in fetch_hubspot_owners() if o["id"] == str(sequence_sender_owner_id)), None)
+            if not sender or not sender.get("email") or not sender.get("user_id"):
+                sequence_errors = [{"error": f"Selected sender (owner {sequence_sender_owner_id}) has no connected email/userId on file"}]
+            else:
+                enroll_result = apollo.enroll_contacts_in_sequence(
+                    [hs_id for _, hs_id in pushed_candidate_hs_ids],
+                    sequence_id, sender["email"], sender["user_id"]
                 )
+                enrolled_set = set(enroll_result["enrolled"])
+                sequence_errors = enroll_result["errors"]
+                sequence_enrolled = len(enrolled_set)
+                enrolled_at = datetime.now(timezone.utc).isoformat()
+                for cand_id, hs_id in pushed_candidate_hs_ids:
+                    status = "enrolled" if hs_id in enrolled_set else "failed"
+                    conn.execute(
+                        "UPDATE pull_candidates SET sequence_status = ?, sequence_enrolled_at = ? WHERE id = ?",
+                        [status, enrolled_at if status == "enrolled" else None, cand_id]
+                    )
 
         conn.execute("UPDATE pull_batches SET stage = 'pushed' WHERE id = ?", [batch_id])
 

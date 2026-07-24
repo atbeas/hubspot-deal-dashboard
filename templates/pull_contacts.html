@@ -286,6 +286,20 @@
           </div>
           <input type="datetime-local" id="fTaskDue" style="margin-top:8px" />
         </div>
+        <div class="field">
+          <label>Task Assigned To</label>
+          <select id="fTaskOwner"></select>
+          <div class="hint">Defaults to Contact Owner — change to assign the follow-up task to someone else.</div>
+        </div>
+        <div class="field">
+          <label>Enroll in Sequence</label>
+          <select id="fSequence"><option value="">— none —</option></select>
+        </div>
+        <div class="field">
+          <label>Sequence Sender</label>
+          <select id="fSequenceSender"><option value="">— none —</option></select>
+          <div class="hint">Must be a connected inbox on a paid Sales/Service Hub seat.</div>
+        </div>
       </div>
       <div class="btn-row">
         <button class="btn btn-primary" id="pushBtn" type="button">Push to HubSpot</button>
@@ -670,7 +684,17 @@ async function loadHubspotOptions() {
 async function loadOwners() {
   const resp = await fetch('/api/owners');
   const data = await resp.json();
-  document.getElementById('fOwner').innerHTML = sortByLabel(data.owners, 'name').map(o => `<option value="${o.id}">${esc(o.name)}${o.email ? ' — ' + esc(o.email) : ''}</option>`).join('');
+  const ownerOptions = sortByLabel(data.owners, 'name').map(o => `<option value="${o.id}">${esc(o.name)}${o.email ? ' — ' + esc(o.email) : ''}</option>`).join('');
+  document.getElementById('fOwner').innerHTML = ownerOptions;
+  document.getElementById('fTaskOwner').innerHTML = ownerOptions;
+  document.getElementById('fSequenceSender').innerHTML = '<option value="">— none —</option>' + ownerOptions;
+}
+
+async function loadSequenceOptions() {
+  const resp = await fetch('/api/pull-contacts/sequences');
+  const data = await resp.json();
+  document.getElementById('fSequence').innerHTML = '<option value="">— none —</option>' +
+    data.sequences.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
 }
 
 function renderPushSummary() {
@@ -694,10 +718,18 @@ function renderPushSummary() {
 async function preparePushPanel() {
   if (!document.getElementById('fSalesFocus').options.length) await loadHubspotOptions();
   if (!document.getElementById('fOwner').options.length) await loadOwners();
+  if (!document.getElementById('fSequence').options.length) await loadSequenceOptions();
   if (!document.getElementById('fTaskDue').value) {
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     document.getElementById('fTaskDue').value = now.toISOString().slice(0, 16);
+  }
+  // Task Assigned To defaults to whatever Contact Owner is currently set to
+  // (matches the old single-owner behavior) but stays independently
+  // editable -- these are 3 separate people (contact owner, sequence
+  // sender, task assignee) who don't have to be the same person.
+  if (!document.getElementById('fTaskOwner').value) {
+    document.getElementById('fTaskOwner').value = document.getElementById('fOwner').value;
   }
 
   const focusSel = document.getElementById('fSalesFocus');
@@ -705,14 +737,20 @@ async function preparePushPanel() {
   if (currentCadence && currentCadence.default_sales_focus) {
     focusSel.value = currentCadence.default_sales_focus;
     focusSel.disabled = true;
-    const seqLine = currentCadence.sequence_id
-      ? ` Approved contacts will be enrolled in HubSpot Sequence ${esc(currentCadence.sequence_id)} from ${esc(currentCadence.sequence_sender_email)}.`
-      : '';
-    cadenceNote.innerHTML = `<div class="result-banner" style="margin-bottom:14px">🔒 "${esc(currentCadence.name)}" always tags <b>${esc(currentCadence.default_sales_focus)}</b> — locked, not editable here.${seqLine}</div>`;
+    cadenceNote.innerHTML = `<div class="result-banner" style="margin-bottom:14px">🔒 "${esc(currentCadence.name)}" always tags <b>${esc(currentCadence.default_sales_focus)}</b> — locked, not editable here. Sequence/Sender/Task Assignee below are pre-filled from this cadence but can be changed for this push.</div>`;
     cadenceNote.style.display = '';
   } else {
     focusSel.disabled = false;
     cadenceNote.style.display = 'none';
+  }
+  // Sequence/sender are pre-filled suggestions (not locked) so any batch --
+  // cadence-driven or manual -- can enroll into whichever sequence/sender
+  // makes sense for it.
+  if (currentCadence && currentCadence.sequence_id && !document.getElementById('fSequence').value) {
+    document.getElementById('fSequence').value = currentCadence.sequence_id;
+  }
+  if (currentCadence && currentCadence.sequence_sender_owner_id && !document.getElementById('fSequenceSender').value) {
+    document.getElementById('fSequenceSender').value = currentCadence.sequence_sender_owner_id;
   }
 
   renderPushSummary();
@@ -729,6 +767,8 @@ document.getElementById('pushBtn').addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = 'Pushing…';
   try {
     const dueLocal = document.getElementById('fTaskDue').value;
+    const sequenceId = document.getElementById('fSequence').value;
+    const sequenceSenderOwnerId = document.getElementById('fSequenceSender').value;
     const resp = await fetch(`/api/pull-contacts/batches/${currentBatchId}/push`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -736,12 +776,15 @@ document.getElementById('pushBtn').addEventListener('click', async () => {
         lead_source: document.getElementById('fLeadSource').value,
         custom_industry: document.getElementById('fCustomIndustry').value,
         owner_id: document.getElementById('fOwner').value,
+        task_owner_id: document.getElementById('fTaskOwner').value,
         create_tasks: document.getElementById('fCreateTasks').checked,
         task_due_iso: dueLocal ? new Date(dueLocal).toISOString() : null,
+        sequence_id: sequenceId || null,
+        sequence_sender_owner_id: sequenceSenderOwnerId || null,
       })
     });
     const data = await resp.json();
-    const seqLine = currentCadence && currentCadence.sequence_id
+    const seqLine = sequenceId
       ? ` ${data.sequence_enrolled} enrolled in the Sequence${data.sequence_errors && data.sequence_errors.length ? `, ${data.sequence_errors.length} failed to enroll (see console)` : ''}.`
       : '';
     if (data.sequence_errors && data.sequence_errors.length) console.warn('Sequence enrollment errors:', data.sequence_errors);
