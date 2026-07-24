@@ -226,7 +226,7 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th style="width:30px"></th><th>Name</th><th>Title</th><th>Company</th><th>Email on file</th><th>Direct phone on file</th><th>Apollo Enriched?</th><th>HubSpot Pushed?</th><th>Seen before?</th></tr></thead>
+          <thead><tr><th style="width:30px"><input type="checkbox" id="scrubSelectAll" onchange="toggleAllScrub(this.checked)" title="Select/deselect all" /></th><th>Name</th><th>Title</th><th>Company</th><th>Email on file</th><th>Direct phone on file</th><th>Apollo Enriched?</th><th>HubSpot Pushed?</th><th>Seen before?</th></tr></thead>
           <tbody id="scrubBody"></tbody>
         </table>
       </div>
@@ -243,7 +243,7 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th style="width:30px"></th><th>Name</th><th>Company</th><th>Email</th><th>Mobile</th><th>Company Phone</th><th>LinkedIn</th><th>Industry</th><th>Apollo Enriched?</th><th>HubSpot Pushed?</th><th>Seen before?</th></tr></thead>
+          <thead><tr><th style="width:30px"><input type="checkbox" id="enrichSelectAll" onchange="toggleAllEnrich(this.checked)" title="Select/deselect all" /></th><th>Name</th><th>Company</th><th>Email</th><th>Mobile</th><th>Company Phone</th><th>LinkedIn</th><th>Industry</th><th>Apollo Enriched?</th><th>HubSpot Pushed?</th><th>Seen before?</th></tr></thead>
           <tbody id="enrichBody"></tbody>
         </table>
       </div>
@@ -563,6 +563,7 @@ function seenBeforeCell(c) {
 function renderScrubTable() {
   const kept = currentCandidates.filter(c => c.keep).length;
   document.getElementById('totalKept').textContent = kept;
+  document.getElementById('scrubSelectAll').checked = currentCandidates.length > 0 && kept === currentCandidates.length;
   document.getElementById('scrubBody').innerHTML = currentCandidates.map(c => `
     <tr class="${c.keep ? '' : 'removed'}">
       <td><input type="checkbox" ${c.keep ? 'checked' : ''} onchange="toggleCandidate(${c.id}, this.checked)" /></td>
@@ -588,6 +589,36 @@ function toggleCandidate(id, keep) {
   renderScrubTable();
 }
 
+function toggleAllScrub(keep) {
+  const ids = currentCandidates.map(c => c.id);
+  currentCandidates.forEach(c => { c.keep = keep; });
+  if (ids.length) {
+    fetch(`/api/pull-contacts/batches/${currentBatchId}/toggle`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({candidate_ids: ids, keep})
+    });
+  }
+  renderScrubTable();
+}
+
+function toggleAllEnrich(keep) {
+  // Enrich only ever shows currently-kept rows -- "select all" here is a
+  // no-op (they're already kept), the meaningful case is "deselect all" to
+  // bulk-drop everyone still visible at this stage. Dropped rows disappear
+  // from this table on the next render, same as unchecking one at a time.
+  const ids = currentCandidates.filter(c => c.keep).map(c => c.id);
+  if (!keep) {
+    currentCandidates.forEach(c => { if (c.keep) c.keep = false; });
+  }
+  if (ids.length) {
+    fetch(`/api/pull-contacts/batches/${currentBatchId}/toggle`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({candidate_ids: ids, keep})
+    });
+  }
+  renderEnrichTable();
+}
+
 document.getElementById('continueToEnrichBtn').addEventListener('click', async () => {
   const btn = document.getElementById('continueToEnrichBtn');
   btn.disabled = true; btn.textContent = 'Enriching…';
@@ -608,6 +639,7 @@ document.getElementById('continueToEnrichBtn').addEventListener('click', async (
 function renderEnrichTable() {
   const kept = currentCandidates.filter(c => c.keep);
   document.getElementById('enrichTotal').textContent = kept.length;
+  document.getElementById('enrichSelectAll').checked = kept.length > 0;
   document.getElementById('enrichDone').textContent = kept.filter(
     c => c.enrich_status !== 'enriching' && c.mobile_status !== 'pending'
   ).length;
