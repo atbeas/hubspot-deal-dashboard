@@ -217,6 +217,7 @@ def init_db():
         for col, ddl in [
             ("sequence_status", "TEXT DEFAULT ''"),
             ("sequence_enrolled_at", "TEXT"),
+            ("existing_owner_email", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE pull_candidates ADD COLUMN {col} {ddl}")
@@ -2251,6 +2252,7 @@ def _candidate_row_to_dict(row):
         "hubspot_contact_id": row["hubspot_contact_id"],
         "pushed_at": row["pushed_at"],
         "hubspot_status": row["hubspot_status"],
+        "existing_owner_email": row["existing_owner_email"],
         "sequence_status": row["sequence_status"],
         "sequence_enrolled_at": row["sequence_enrolled_at"],
     }
@@ -2330,6 +2332,11 @@ def _refresh_hubspot_status(conn, batch_id):
     other route (manual import, a different workflow) would never show up
     in our pull_batches history, so the only reliable answer to "is this
     already in HubSpot" is to ask HubSpot directly.
+
+    When a match is found, also resolves the existing contact's owner to an
+    email address -- surfaced next to the name on the Scrub/Enrich tables so
+    Andrew can tell which of a person's possible duplicate HubSpot profiles
+    he's looking at before deciding whether to keep/re-push them.
     """
     rows = conn.execute(
         "SELECT id, email FROM pull_candidates WHERE batch_id = ? AND email != '' AND hubspot_status = 'unknown'",
@@ -2338,9 +2345,19 @@ def _refresh_hubspot_status(conn, batch_id):
     if not rows:
         return
     found = apollo.check_hubspot_existence([r["email"] for r in rows])
+    owner_email_by_id = None
     for r in rows:
-        status = "found" if r["email"].lower() in found else "not_found"
-        conn.execute("UPDATE pull_candidates SET hubspot_status = ? WHERE id = ?", [status, r["id"]])
+        match = found.get(r["email"].lower())
+        status = "found" if match else "not_found"
+        owner_email = ""
+        if match and match.get("owner_id"):
+            if owner_email_by_id is None:
+                owner_email_by_id = {o["id"]: o["email"] for o in fetch_hubspot_owners()}
+            owner_email = owner_email_by_id.get(str(match["owner_id"]), "")
+        conn.execute(
+            "UPDATE pull_candidates SET hubspot_status = ?, existing_owner_email = ? WHERE id = ?",
+            [status, owner_email, r["id"]]
+        )
 
 
 @app.route("/pull-contacts")

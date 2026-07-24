@@ -525,6 +525,12 @@ function apolloEnrichedCell(c) {
   return '<span class="pill pill-warn">Not enriched</span>';
 }
 
+function nameCell(c) {
+  const name = `${esc(c.first_name)} ${esc(c.last_name)}`;
+  if (!c.existing_owner_email) return name;
+  return `${name}<br><span class="pill pill-pending" title="Contact owner on the existing HubSpot profile that matched this email">${esc(c.existing_owner_email)}</span>`;
+}
+
 function hubspotStatusCell(c) {
   if (c.hubspot_status === 'found') return '<span class="pill pill-good" title="A live check found this email already in HubSpot">Pushed</span>';
   if (c.hubspot_status === 'not_found') return '<span class="pill pill-bad">Not pushed</span>';
@@ -546,7 +552,7 @@ function renderScrubTable() {
   document.getElementById('scrubBody').innerHTML = currentCandidates.map(c => `
     <tr class="${c.keep ? '' : 'removed'}">
       <td><input type="checkbox" ${c.keep ? 'checked' : ''} onchange="toggleCandidate(${c.id}, this.checked)" /></td>
-      <td>${esc(c.first_name)} ${esc(c.last_name)}</td>
+      <td>${nameCell(c)}</td>
       <td>${esc(c.title)}</td>
       <td>${esc(c.company_name)}</td>
       <td>${c.has_email !== false ? '<span class="pill pill-good">has email</span>' : '<span class="pill pill-bad">none</span>'}</td>
@@ -603,7 +609,7 @@ function renderEnrichTable() {
     return `
       <tr>
         <td><input type="checkbox" checked onchange="toggleCandidate(${c.id}, this.checked)" /></td>
-        <td>${esc(c.first_name)} ${esc(c.last_name)}</td>
+        <td>${nameCell(c)}</td>
         <td>${esc(c.company_name)}</td>
         <td>${emailCell}</td>
         <td>${mobilePill}</td>

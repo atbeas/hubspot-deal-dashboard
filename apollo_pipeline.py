@@ -361,8 +361,10 @@ def check_hubspot_existence(emails):
     already exists in the CRM regardless of whether OUR pipeline is the one
     that put it there (a contact pushed via manual import, another workflow,
     etc. would never show up in our own pull_batches history, so this is the
-    only reliable way to check). Returns lowercased email -> hubspot_contact_id
-    for every email found; missing keys mean "not found".
+    only reliable way to check). Returns lowercased email -> {"id", "owner_id"}
+    for every email found; missing keys mean "not found". owner_id is the
+    raw hubspot_owner_id property (still needs resolving to a name/email) and
+    may be None if the matched contact has no owner assigned.
     """
     found = {}
     unique_emails = list({e for e in emails if e})
@@ -370,15 +372,16 @@ def check_hubspot_existence(emails):
         batch = unique_emails[i:i + 100]
         resp = requests.post(f"{HUBSPOT_BASE}/crm/v3/objects/contacts/batch/read",
                               headers=_hubspot_headers(),
-                              json={"idProperty": "email", "properties": ["email"],
+                              json={"idProperty": "email", "properties": ["email", "hubspot_owner_id"],
                                     "inputs": [{"id": e} for e in batch]},
                               timeout=30)
         if not resp.ok:
             continue
         for r in resp.json().get("results", []):
-            email = (r.get("properties") or {}).get("email")
+            props = r.get("properties") or {}
+            email = props.get("email")
             if email:
-                found[email.lower()] = r.get("id")
+                found[email.lower()] = {"id": r.get("id"), "owner_id": props.get("hubspot_owner_id")}
     return found
 
 
