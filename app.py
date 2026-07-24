@@ -2339,7 +2339,9 @@ def _refresh_hubspot_status(conn, batch_id):
     he's looking at before deciding whether to keep/re-push them.
     """
     rows = conn.execute(
-        "SELECT id, email FROM pull_candidates WHERE batch_id = ? AND email != '' AND hubspot_status = 'unknown'",
+        """SELECT id, email FROM pull_candidates WHERE batch_id = ? AND email != ''
+           AND (hubspot_status = 'unknown'
+                OR (hubspot_status = 'found' AND existing_owner_email = ''))""",
         [batch_id]
     ).fetchall()
     if not rows:
