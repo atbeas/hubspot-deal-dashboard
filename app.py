@@ -23,9 +23,15 @@ TAB_DEFS = [
     ("archived",      "Archived Deals"),
     ("hs_workflows",  "HS Workflows"),
     ("pull_contacts", "Pull Contacts"),
+    ("msp_data",      "MSP Data"),
     ("admin",         "Admin"),
 ]
 TAB_KEYS = [key for key, _ in TAB_DEFS]
+
+# Secret-header bypass for the MSP Data tracking-write API, same pattern as
+# PULL_CONTACTS_CRON_SECRET -- lets an external script (the MSP cleanup batch
+# process) record verification results without an interactive login session.
+MSP_TRACK_API_SECRET = os.environ.get("MSP_TRACK_API_SECRET", "")
 
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", os.path.dirname(__file__)), "client_contacts.db")
 
@@ -262,6 +268,19 @@ def init_db():
             )
 
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS msp_tracking (
+                contact_id TEXT PRIMARY KEY,
+                msp_verified TEXT DEFAULT '',
+                msp_verified_method TEXT DEFAULT '',
+                msp_verified_at TEXT,
+                seniority_verified INTEGER DEFAULT 0,
+                seniority_verified_at TEXT,
+                email_enriched INTEGER DEFAULT 0,
+                email_enriched_at TEXT,
+                updated_at TEXT
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS app_users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -438,7 +457,8 @@ def first_accessible_url(user):
             continue  # not a standalone page, always paired with dashboard
         if user_has_tab(user, key):
             return url_for({"dashboard": "index", "hs_workflows": "hs_workflows_page",
-                            "pull_contacts": "pull_contacts_page", "admin": "admin"}[key])
+                            "pull_contacts": "pull_contacts_page", "msp_data": "msp_data_page",
+                            "admin": "admin"}[key])
     return url_for("no_access")
 
 
@@ -684,6 +704,123 @@ def fetch_hubspot_owners():
             break
     owners.sort(key=lambda x: x["name"].lower())
     return owners
+
+
+MSP_CONTACT_PROPS = [
+    "firstname", "lastname", "email", "company", "custom_industry", "industry",
+    "hs_timezone", "address", "city", "state", "hubspot_owner_id", "notes_last_contacted",
+]
+_MSP_CONTACTS_CACHE = {"data": None, "ts": 0}
+MSP_CONTACTS_CACHE_TTL = 600  # seconds
+
+
+def fetch_msp_contacts_live():
+    """Every contact currently tagged custom_industry=MSP, live from HubSpot.
+    This is the full population the MSP Data tab tracks cleanup progress
+    against -- verification state itself lives locally (msp_tracking),
+    joined onto this list by contact id."""
+    contacts = []
+    after = None
+    while True:
+        body = {
+            "filterGroups": [{"filters": [{"propertyName": "custom_industry", "operator": "EQ", "value": "MSP"}]}],
+            "properties": MSP_CONTACT_PROPS,
+            "limit": 200,
+        }
+        if after:
+            body["after"] = after
+        resp = requests.post(f"{BASE_URL}/crm/v3/objects/contacts/search", headers=HEADERS, json=body, timeout=30)
+        if not resp.ok:
+            break
+        data = resp.json()
+        for r in data.get("results", []):
+            props = r.get("properties") or {}
+            contacts.append({"id": r["id"], **{k: (props.get(k) or "") for k in MSP_CONTACT_PROPS}})
+        after = data.get("paging", {}).get("next", {}).get("after")
+        if not after:
+            break
+    return contacts
+
+
+def get_msp_contacts_cached(force=False):
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _MSP_CONTACTS_CACHE["data"]
+    if not force and cached and (now_ts - _MSP_CONTACTS_CACHE["ts"] < MSP_CONTACTS_CACHE_TTL):
+        return cached
+    contacts = fetch_msp_contacts_live()
+    _MSP_CONTACTS_CACHE["data"] = contacts
+    _MSP_CONTACTS_CACHE["ts"] = now_ts
+    return contacts
+
+
+def get_msp_tracking_map():
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM msp_tracking").fetchall()
+    return {r["contact_id"]: dict(r) for r in rows}
+
+
+def upsert_msp_tracking(contact_id, msp_verified=None, msp_verified_method=None,
+                         seniority_verified=None, email_enriched=None):
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as conn:
+        row = conn.execute("SELECT contact_id FROM msp_tracking WHERE contact_id = ?", [contact_id]).fetchone()
+        if not row:
+            conn.execute("INSERT INTO msp_tracking (contact_id, updated_at) VALUES (?, ?)", [contact_id, now])
+        fields, values = [], []
+        if msp_verified is not None:
+            fields += ["msp_verified = ?", "msp_verified_method = ?", "msp_verified_at = ?"]
+            values += [msp_verified, msp_verified_method or "", now]
+        if seniority_verified is not None:
+            fields += ["seniority_verified = ?", "seniority_verified_at = ?"]
+            values += [1 if seniority_verified else 0, now]
+        if email_enriched is not None:
+            fields += ["email_enriched = ?", "email_enriched_at = ?"]
+            values += [1 if email_enriched else 0, now]
+        if fields:
+            fields.append("updated_at = ?")
+            values.append(now)
+            values.append(contact_id)
+            conn.execute(f"UPDATE msp_tracking SET {', '.join(fields)} WHERE contact_id = ?", values)
+
+
+def get_open_task_flags(contact_ids):
+    """True/False per contact id: does it have any non-completed task
+    associated? Deliberately only called for one page of ids at a time
+    (association + task batch/read calls aren't worth caching across the
+    full ~3,300-contact MSP population)."""
+    if not contact_ids:
+        return {}
+    resp = requests.post(
+        f"{BASE_URL}/crm/v4/associations/contacts/tasks/batch/read",
+        headers=HEADERS, json={"inputs": [{"id": cid} for cid in contact_ids]}, timeout=30,
+    )
+    if not resp.ok:
+        return {cid: False for cid in contact_ids}
+    contact_task_map = {}
+    task_ids = set()
+    for r in resp.json().get("results", []):
+        cid = str(r.get("from", {}).get("id", ""))
+        tids = [str(t["toObjectId"]) for t in r.get("to", [])]
+        contact_task_map[cid] = tids
+        task_ids.update(tids)
+    task_status = {}
+    for batch in _chunks(list(task_ids), 100):
+        r2 = requests.post(f"{BASE_URL}/crm/v3/objects/tasks/batch/read", headers=HEADERS,
+                            json={"properties": ["hs_task_status"], "inputs": [{"id": t} for t in batch]}, timeout=30)
+        if r2.ok:
+            for row in r2.json().get("results", []):
+                task_status[row["id"]] = (row.get("properties") or {}).get("hs_task_status")
+    return {
+        cid: any(task_status.get(t) not in ("COMPLETED", None) for t in contact_task_map.get(cid, []))
+        for cid in contact_ids
+    }
+
+
+def msp_track_write_allowed():
+    if MSP_TRACK_API_SECRET and request.headers.get("X-Msp-Track-Secret") == MSP_TRACK_API_SECRET:
+        return True
+    user = get_current_user()
+    return bool(user and user_has_tab(user, "msp_data"))
 
 
 def get_owner_eligibility():
@@ -2411,6 +2548,138 @@ def _refresh_hubspot_status(conn, batch_id):
 @tab_required('pull_contacts')
 def pull_contacts_page():
     return render_template("pull_contacts.html")
+
+
+@app.route("/msp-data")
+@tab_required('msp_data')
+def msp_data_page():
+    return render_template("msp_data.html")
+
+
+@app.route("/api/msp-data/summary")
+@tab_required('msp_data')
+def msp_data_summary():
+    all_contacts = get_msp_contacts_cached(force=request.args.get("refresh") == "1")
+    tracking = get_msp_tracking_map()
+    counts = {"yes": 0, "no": 0, "unverifiable": 0, "unverified": 0}
+    seniority_verified = 0
+    email_enriched = 0
+    for c in all_contacts:
+        t = tracking.get(c["id"])
+        st = (t["msp_verified"] if t and t["msp_verified"] else "") or "unverified"
+        counts[st] = counts.get(st, 0) + 1
+        if t and t.get("seniority_verified"):
+            seniority_verified += 1
+        if t and t.get("email_enriched"):
+            email_enriched += 1
+    return jsonify({
+        "total": len(all_contacts), "counts": counts,
+        "seniority_verified": seniority_verified, "email_enriched": email_enriched,
+    })
+
+
+@app.route("/api/msp-data/contacts")
+@tab_required('msp_data')
+def msp_data_contacts():
+    status = request.args.get("status", "all")
+    q = (request.args.get("q") or "").strip().lower()
+    page = max(1, int(request.args.get("page", 1) or 1))
+    per_page = min(100, max(1, int(request.args.get("per_page", 50) or 50)))
+
+    all_contacts = get_msp_contacts_cached(force=request.args.get("refresh") == "1")
+    tracking = get_msp_tracking_map()
+
+    status_map = {"unverified": "unverified", "verified_msp": "yes",
+                  "verified_not_msp": "no", "unverifiable": "unverifiable"}
+
+    def status_of(cid):
+        t = tracking.get(cid)
+        return (t["msp_verified"] if t and t["msp_verified"] else "") or "unverified"
+
+    filtered = []
+    for c in all_contacts:
+        if status != "all" and status_of(c["id"]) != status_map.get(status):
+            continue
+        if q:
+            hay = f"{c.get('company','')} {c.get('email','')} {c.get('firstname','')} {c.get('lastname','')}".lower()
+            if q not in hay:
+                continue
+        filtered.append(c)
+
+    filtered.sort(key=lambda c: (c.get("company") or "").lower())
+    total = len(filtered)
+    start = (page - 1) * per_page
+    page_items = filtered[start:start + per_page]
+    page_ids = [c["id"] for c in page_items]
+
+    owners = {o["id"]: o["name"] for o in fetch_hubspot_owners()}
+    open_tasks = get_open_task_flags(page_ids)
+
+    rows = []
+    for c in page_items:
+        t = tracking.get(c["id"], {})
+        addr_parts = [p for p in [c.get("address"), c.get("city"), c.get("state")] if p and p != "Unassigned"]
+        rows.append({
+            "id": c["id"],
+            "company": c.get("company", ""),
+            "name": f"{c.get('firstname','')} {c.get('lastname','')}".strip(),
+            "email": c.get("email", ""),
+            "msp_verified": t.get("msp_verified") or "",
+            "msp_verified_method": t.get("msp_verified_method") or "",
+            "msp_verified_at": t.get("msp_verified_at") or "",
+            "seniority_verified": bool(t.get("seniority_verified")),
+            "seniority_verified_at": t.get("seniority_verified_at") or "",
+            "email_enriched": bool(t.get("email_enriched")),
+            "email_enriched_at": t.get("email_enriched_at") or "",
+            "timezone": c.get("hs_timezone") if c.get("hs_timezone") != "Unassigned" else "",
+            "address": ", ".join(addr_parts),
+            "owner": owners.get(c.get("hubspot_owner_id"), ""),
+            "last_contacted": c.get("notes_last_contacted", ""),
+            "open_task": open_tasks.get(c["id"], False),
+            "hubspot_url": f"https://app.hubspot.com/contacts/23416553/record/0-1/{c['id']}",
+        })
+
+    return jsonify({"total": total, "page": page, "per_page": per_page, "rows": rows})
+
+
+@app.route("/api/msp-data/track", methods=["POST"])
+def msp_data_track():
+    if not msp_track_write_allowed():
+        return jsonify({"error": "unauthorized"}), 403
+    body = request.get_json(force=True) or {}
+    contact_id = str(body.get("contact_id") or "")
+    if not contact_id:
+        return jsonify({"error": "contact_id required"}), 400
+    upsert_msp_tracking(
+        contact_id,
+        msp_verified=body.get("msp_verified"),
+        msp_verified_method=body.get("msp_verified_method"),
+        seniority_verified=body.get("seniority_verified"),
+        email_enriched=body.get("email_enriched"),
+    )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/msp-data/track/bulk", methods=["POST"])
+def msp_data_track_bulk():
+    if not msp_track_write_allowed():
+        return jsonify({"error": "unauthorized"}), 403
+    body = request.get_json(force=True) or {}
+    items = body.get("items") or []
+    count = 0
+    for item in items:
+        cid = str(item.get("contact_id") or "")
+        if not cid:
+            continue
+        upsert_msp_tracking(
+            cid,
+            msp_verified=item.get("msp_verified"),
+            msp_verified_method=item.get("msp_verified_method"),
+            seniority_verified=item.get("seniority_verified"),
+            email_enriched=item.get("email_enriched"),
+        )
+        count += 1
+    return jsonify({"ok": True, "count": count})
 
 
 @app.route("/api/pull-contacts/searches")
