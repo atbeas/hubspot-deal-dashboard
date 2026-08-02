@@ -90,14 +90,19 @@
     .batch-group { border: 1px solid #2a2d3e; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
     .batch-header {
       display: flex; align-items: center; justify-content: space-between; cursor: pointer;
-      padding: 10px 14px; background: #181a26; user-select: none;
+      padding: 10px 14px; background: #181a26; user-select: none; gap: 12px;
     }
     .batch-header .title { font-size: .85rem; font-weight: 700; color: #e8e9f0; }
     .batch-header .meta { font-size: .74rem; color: #8b8fa8; margin-top: 2px; }
+    .batch-header .counts { font-size: .76rem; color: #c9cad8; margin-top: 5px; }
+    .batch-header .counts b { color: #e8e9f0; }
+    .batch-header-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
     .batch-header .chevron { transition: transform .15s; color: #8b8fa8; font-size: .75rem; }
     .batch-header.open .chevron { transform: rotate(90deg); }
+    .copy-batch-btn { padding: 6px 12px; font-size: .74rem; white-space: nowrap; }
     .batch-entries { display: none; }
     .batch-entries.open { display: block; }
+    .batch-summary-prose { padding: 10px 14px; border-top: 1px solid #22243a; font-size: .82rem; color: #c9cad8; background: rgba(255,255,255,.02); line-height: 1.5; }
 
     .changelog-entry { padding: 10px 14px; border-top: 1px solid #22243a; font-size: .82rem; }
     .changelog-entry .row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
@@ -328,10 +333,61 @@ const ACTION_LABELS = {
   unverifiable: {cls: 'action-unverifiable', label: 'Unverifiable'},
 };
 
+let loadedBatches = [];
+
+function countActions(entries) {
+  const counts = {confirmed_msp: 0, not_msp: 0, unverifiable: 0};
+  entries.forEach(e => { if (counts[e.action] !== undefined) counts[e.action]++; });
+  return counts;
+}
+
+function batchCountsLine(counts) {
+  return `<b>${counts.confirmed_msp}</b> confirmed MSP · <b>${counts.not_msp}</b> not MSP · <b>${counts.unverifiable}</b> unverifiable`;
+}
+
+function batchProseSummary(b, counts) {
+  const total = b.entries.length;
+  const parts = [];
+  if (counts.confirmed_msp) parts.push(`<b>${counts.confirmed_msp}</b> were confirmed as genuine MSPs — time zone, address, city, and state were added and their outreach task was renamed`);
+  if (counts.not_msp) parts.push(`<b>${counts.not_msp}</b> were confirmed NOT MSPs — the industry tag was corrected and their outreach task was removed`);
+  if (counts.unverifiable) parts.push(`<b>${counts.unverifiable}</b> couldn't be verified (no working website found) — left unchanged for manual follow-up`);
+  return `Of ${total} contacts reviewed in this batch: ${parts.join('; ')}.`;
+}
+
+function buildBatchSummaryText(b) {
+  const counts = countActions(b.entries);
+  const total = b.entries.length;
+  const lastTs = b.entries.length ? fmtDateTime(b.entries[0].created_at) : '';
+  const lines = [];
+  lines.push(`MSP Data Cleanup — ${b.batch_label}`);
+  lines.push(`Completed: ${lastTs}`);
+  lines.push('');
+  lines.push(`Summary: ${total} contacts reviewed — ${counts.confirmed_msp} confirmed MSP, ${counts.not_msp} confirmed NOT MSP, ${counts.unverifiable} unverifiable (no changes made).`);
+  lines.push('');
+  const sections = [
+    {key: 'confirmed_msp', heading: `CONFIRMED MSP (${counts.confirmed_msp})`},
+    {key: 'not_msp', heading: `NOT AN MSP (${counts.not_msp})`},
+    {key: 'unverifiable', heading: `UNVERIFIABLE (${counts.unverifiable})`},
+  ];
+  sections.forEach(s => {
+    const items = b.entries.filter(e => e.action === s.key);
+    if (!items.length) return;
+    lines.push(`— ${s.heading} —`);
+    items.forEach(e => {
+      lines.push(`• ${e.company || '(no company)'}${e.contact_name ? ' (' + e.contact_name + ')' : ''} — ${fmtDateTime(e.created_at)}`);
+      lines.push(`  ${e.detail || ''}`);
+      if (e.evidence) lines.push(`  Evidence: ${e.evidence}`);
+    });
+    lines.push('');
+  });
+  return lines.join('\n').trim();
+}
+
 async function loadChangelog() {
   const resp = await fetch('/api/msp-data/changelog');
   const data = await resp.json();
   const batches = data.batches || [];
+  loadedBatches = batches;
   const content = document.getElementById('changelogContent');
 
   if (!batches.length) {
@@ -350,16 +406,22 @@ async function loadChangelog() {
     const rangeLabel = first && last
       ? (first.created_at === last.created_at ? fmtDateTime(first.created_at) : `${fmtDateTime(last.created_at)} → ${fmtDateTime(first.created_at)}`)
       : '';
+    const counts = countActions(b.entries);
     return `
       <div class="batch-group">
         <div class="batch-header ${i === 0 ? 'open' : ''}" data-batch-idx="${i}">
           <div>
             <div class="title">${b.batch_label || 'Unlabeled batch'}</div>
             <div class="meta">${b.entries.length} contacts · ${rangeLabel}</div>
+            <div class="counts">${batchCountsLine(counts)}</div>
           </div>
-          <span class="chevron">▶</span>
+          <div class="batch-header-actions">
+            <button class="btn btn-ghost copy-batch-btn" data-batch-idx="${i}" type="button">⧉ Copy Summary</button>
+            <span class="chevron">▶</span>
+          </div>
         </div>
         <div class="batch-entries ${i === 0 ? 'open' : ''}" id="batchEntries${i}">
+          <div class="batch-summary-prose">${batchProseSummary(b, counts)}</div>
           ${b.entries.map(e => {
             const a = ACTION_LABELS[e.action] || {cls: '', label: e.action || ''};
             return `
@@ -386,6 +448,19 @@ async function loadChangelog() {
     el.addEventListener('click', () => {
       el.classList.toggle('open');
       document.getElementById(`batchEntries${el.dataset.batchIdx}`).classList.toggle('open');
+    });
+  });
+
+  content.querySelectorAll('.copy-batch-btn').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const idx = parseInt(btn.dataset.batchIdx, 10);
+      const text = buildBatchSummaryText(loadedBatches[idx]);
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = '✓ Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      });
     });
   });
 }
