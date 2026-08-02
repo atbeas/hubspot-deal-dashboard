@@ -124,6 +124,7 @@
             <th>MSP Verified?</th>
             <th>C-Level Verified?</th>
             <th>Email Enriched?</th>
+            <th>Last Enriched</th>
             <th>Address Verified?</th>
             <th>Time Zone</th>
             <th>Mailing Address</th>
@@ -208,7 +209,7 @@ async function loadTable() {
 
   const tbody = document.getElementById('tableBody');
   if (!data.rows.length) {
-    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-hint">No contacts match this filter.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-hint">No contacts match this filter.</div></td></tr>`;
   } else {
     tbody.innerHTML = data.rows.map(r => `
       <tr>
@@ -220,6 +221,7 @@ async function loadTable() {
         <td>${verifiedPill(r)}</td>
         <td>${boolPill(r.seniority_verified, r.seniority_verified_at)}</td>
         <td>${boolPill(r.email_enriched, r.email_enriched_at)}</td>
+        <td>${r.email_enriched_at ? fmtDate(r.email_enriched_at) : '<span class="sub">Never</span>'}</td>
         <td>${boolPill(r.address_verified, r.address_verified_at)}</td>
         <td>${r.timezone || '<span class="sub">—</span>'}</td>
         <td>${r.address || '<span class="sub">—</span>'}</td>
