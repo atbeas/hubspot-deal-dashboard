@@ -73,6 +73,44 @@
 
     .pagination { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: .84rem; color: #8b8fa8; }
     .empty-hint { color: #5c607a; font-size: .85rem; padding: 30px 0; text-align: center; }
+
+    .changelog-panel { padding: 0; overflow: hidden; }
+    .changelog-header {
+      display: flex; align-items: center; justify-content: space-between; cursor: pointer;
+      padding: 16px 20px; user-select: none;
+    }
+    .changelog-header h2 { font-size: .95rem; font-weight: 700; color: #e8e9f0; }
+    .changelog-header .sub { display: inline; color: #8b8fa8; font-weight: 400; margin-left: 8px; font-size: .78rem; }
+    .changelog-header .chevron { transition: transform .15s; color: #8b8fa8; font-size: .8rem; }
+    .changelog-header.open .chevron { transform: rotate(90deg); }
+    .changelog-body { display: none; padding: 0 20px 18px; }
+    .changelog-body.open { display: block; }
+    .changelog-empty { color: #5c607a; font-size: .85rem; padding: 6px 0 14px; }
+
+    .batch-group { border: 1px solid #2a2d3e; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+    .batch-header {
+      display: flex; align-items: center; justify-content: space-between; cursor: pointer;
+      padding: 10px 14px; background: #181a26; user-select: none;
+    }
+    .batch-header .title { font-size: .85rem; font-weight: 700; color: #e8e9f0; }
+    .batch-header .meta { font-size: .74rem; color: #8b8fa8; margin-top: 2px; }
+    .batch-header .chevron { transition: transform .15s; color: #8b8fa8; font-size: .75rem; }
+    .batch-header.open .chevron { transform: rotate(90deg); }
+    .batch-entries { display: none; }
+    .batch-entries.open { display: block; }
+
+    .changelog-entry { padding: 10px 14px; border-top: 1px solid #22243a; font-size: .82rem; }
+    .changelog-entry .row1 { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .changelog-entry .company { font-weight: 600; color: #e8e9f0; }
+    .changelog-entry .contact { color: #8b8fa8; font-size: .76rem; margin-left: 6px; }
+    .changelog-entry .ts { color: #5c607a; font-size: .74rem; white-space: nowrap; }
+    .changelog-entry .detail { color: #c9cad8; margin-top: 4px; line-height: 1.45; }
+    .changelog-entry .evidence { color: #8b8fa8; font-size: .76rem; margin-top: 3px; font-style: italic; }
+    .action-badge { display: inline-block; font-size: .66rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; letter-spacing: .2px; margin-right: 6px; white-space: nowrap; }
+    .action-msp { background: rgba(34,197,94,.15); color: #4ade80; }
+    .action-not-msp { background: rgba(248,113,113,.15); color: #f87171; }
+    .action-unverifiable { background: rgba(251,191,36,.15); color: #fbbf24; }
+    .copy-hint { font-size: .74rem; color: #5c607a; }
   </style>
 </head>
 <body>
@@ -99,6 +137,19 @@
 
 <div class="main">
   <div class="summary-strip" id="summaryStrip"></div>
+
+  <div class="panel changelog-panel">
+    <div class="changelog-header" id="changelogHeader">
+      <div>
+        <h2>Change Log<span class="sub" id="changelogSummary">— what's been changed so far, date/time stamped</span></h2>
+      </div>
+      <span class="chevron">▶</span>
+    </div>
+    <div class="changelog-body" id="changelogBody">
+      <div class="copy-hint">Share this with Roslyn or the rep — each entry shows exactly what was changed and when.</div>
+      <div id="changelogContent"></div>
+    </div>
+  </div>
 
   <div class="panel">
     <div class="toolbar">
@@ -264,8 +315,89 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
 document.getElementById('prevPage').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadTable(); } });
 document.getElementById('nextPage').addEventListener('click', () => { currentPage++; loadTable(); });
 
+function fmtDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleString(undefined, {year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
+}
+
+const ACTION_LABELS = {
+  confirmed_msp: {cls: 'action-msp', label: 'Confirmed MSP'},
+  not_msp: {cls: 'action-not-msp', label: 'Not an MSP'},
+  unverifiable: {cls: 'action-unverifiable', label: 'Unverifiable'},
+};
+
+async function loadChangelog() {
+  const resp = await fetch('/api/msp-data/changelog');
+  const data = await resp.json();
+  const batches = data.batches || [];
+  const content = document.getElementById('changelogContent');
+
+  if (!batches.length) {
+    content.innerHTML = `<div class="changelog-empty">No changes logged yet.</div>`;
+    document.getElementById('changelogSummary').textContent = '— nothing logged yet';
+    return;
+  }
+
+  const totalEntries = batches.reduce((sum, b) => sum + b.entries.length, 0);
+  document.getElementById('changelogSummary').textContent =
+    `— ${totalEntries.toLocaleString()} changes across ${batches.length} batch${batches.length === 1 ? '' : 'es'}`;
+
+  content.innerHTML = batches.map((b, i) => {
+    const first = b.entries[0];
+    const last = b.entries[b.entries.length - 1];
+    const rangeLabel = first && last
+      ? (first.created_at === last.created_at ? fmtDateTime(first.created_at) : `${fmtDateTime(last.created_at)} → ${fmtDateTime(first.created_at)}`)
+      : '';
+    return `
+      <div class="batch-group">
+        <div class="batch-header ${i === 0 ? 'open' : ''}" data-batch-idx="${i}">
+          <div>
+            <div class="title">${b.batch_label || 'Unlabeled batch'}</div>
+            <div class="meta">${b.entries.length} contacts · ${rangeLabel}</div>
+          </div>
+          <span class="chevron">▶</span>
+        </div>
+        <div class="batch-entries ${i === 0 ? 'open' : ''}" id="batchEntries${i}">
+          ${b.entries.map(e => {
+            const a = ACTION_LABELS[e.action] || {cls: '', label: e.action || ''};
+            return `
+              <div class="changelog-entry">
+                <div class="row1">
+                  <div>
+                    <span class="action-badge ${a.cls}">${a.label}</span>
+                    <span class="company">${e.company || '(no company)'}</span>
+                    <span class="contact">${e.contact_name || ''}</span>
+                  </div>
+                  <span class="ts">${fmtDateTime(e.created_at)}</span>
+                </div>
+                <div class="detail">${e.detail || ''}</div>
+                ${e.evidence ? `<div class="evidence">Evidence: ${e.evidence}</div>` : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  content.querySelectorAll('.batch-header').forEach(el => {
+    el.addEventListener('click', () => {
+      el.classList.toggle('open');
+      document.getElementById(`batchEntries${el.dataset.batchIdx}`).classList.toggle('open');
+    });
+  });
+}
+
+document.getElementById('changelogHeader').addEventListener('click', () => {
+  document.getElementById('changelogHeader').classList.toggle('open');
+  document.getElementById('changelogBody').classList.toggle('open');
+});
+
 loadSummary();
 loadTable();
+loadChangelog();
 </script>
 
 </body>

@@ -289,6 +289,21 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS msp_changelog (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_label TEXT NOT NULL,
+                contact_id TEXT,
+                company TEXT,
+                contact_name TEXT,
+                action TEXT,
+                detail TEXT,
+                evidence TEXT,
+                task_before TEXT,
+                task_after TEXT,
+                created_at TEXT
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS app_users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -792,6 +807,40 @@ def upsert_msp_tracking(contact_id, msp_verified=None, msp_verified_method=None,
             values.append(now)
             values.append(contact_id)
             conn.execute(f"UPDATE msp_tracking SET {', '.join(fields)} WHERE contact_id = ?", values)
+
+
+def add_msp_changelog_entries(entries):
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as conn:
+        for e in entries:
+            conn.execute("""
+                INSERT INTO msp_changelog
+                    (batch_label, contact_id, company, contact_name, action, detail, evidence, task_before, task_after, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                e.get("batch_label") or "", str(e.get("contact_id") or ""), e.get("company") or "",
+                e.get("contact_name") or "", e.get("action") or "", e.get("detail") or "",
+                e.get("evidence") or "", e.get("task_before") or "", e.get("task_after") or "",
+                e.get("created_at") or now,
+            ])
+
+
+def get_msp_changelog_grouped():
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM msp_changelog ORDER BY created_at DESC, id DESC").fetchall()
+    batches = {}
+    order = []
+    for r in rows:
+        label = r["batch_label"]
+        if label not in batches:
+            batches[label] = {"batch_label": label, "entries": [], "first_at": r["created_at"]}
+            order.append(label)
+        batches[label]["entries"].append({
+            "contact_id": r["contact_id"], "company": r["company"], "contact_name": r["contact_name"],
+            "action": r["action"], "detail": r["detail"], "evidence": r["evidence"],
+            "task_before": r["task_before"], "task_after": r["task_after"], "created_at": r["created_at"],
+        })
+    return [batches[label] for label in order]
 
 
 def get_open_task_flags(contact_ids):
@@ -2699,6 +2748,22 @@ def msp_data_track_bulk():
         )
         count += 1
     return jsonify({"ok": True, "count": count})
+
+
+@app.route("/api/msp-data/changelog")
+@tab_required('msp_data')
+def msp_data_changelog():
+    return jsonify({"batches": get_msp_changelog_grouped()})
+
+
+@app.route("/api/msp-data/changelog/bulk", methods=["POST"])
+def msp_data_changelog_bulk():
+    if not msp_track_write_allowed():
+        return jsonify({"error": "unauthorized"}), 403
+    body = request.get_json(force=True) or {}
+    entries = body.get("entries") or []
+    add_msp_changelog_entries(entries)
+    return jsonify({"ok": True, "count": len(entries)})
 
 
 @app.route("/api/pull-contacts/searches")
