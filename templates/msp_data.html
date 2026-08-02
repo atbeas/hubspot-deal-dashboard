@@ -124,6 +124,7 @@
             <th>MSP Verified?</th>
             <th>C-Level Verified?</th>
             <th>Email Enriched?</th>
+            <th>Address Verified?</th>
             <th>Time Zone</th>
             <th>Mailing Address</th>
             <th>Owner</th>
@@ -180,6 +181,7 @@ async function loadSummary() {
     {key: 'unverified', label: 'Not Yet Checked', num: c.unverified || 0, cls: ''},
     {key: null, label: 'C-Level Verified', num: data.seniority_verified || 0, cls: 'good'},
     {key: null, label: 'Email Enriched', num: data.email_enriched || 0, cls: 'good'},
+    {key: null, label: 'Mailing Address Verified', num: data.address_verified || 0, cls: 'good'},
   ];
   document.getElementById('summaryStrip').innerHTML = chips.map(c => `
     <div class="summary-chip ${c.cls} ${c.key === currentStatus ? 'active' : ''}" ${c.key ? `data-status="${c.key}"` : ''}>
@@ -206,7 +208,7 @@ async function loadTable() {
 
   const tbody = document.getElementById('tableBody');
   if (!data.rows.length) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-hint">No contacts match this filter.</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-hint">No contacts match this filter.</div></td></tr>`;
   } else {
     tbody.innerHTML = data.rows.map(r => `
       <tr>
@@ -218,6 +220,7 @@ async function loadTable() {
         <td>${verifiedPill(r)}</td>
         <td>${boolPill(r.seniority_verified, r.seniority_verified_at)}</td>
         <td>${boolPill(r.email_enriched, r.email_enriched_at)}</td>
+        <td>${boolPill(r.address_verified, r.address_verified_at)}</td>
         <td>${r.timezone || '<span class="sub">—</span>'}</td>
         <td>${r.address || '<span class="sub">—</span>'}</td>
         <td>${r.owner || '<span class="sub">—</span>'}</td>
