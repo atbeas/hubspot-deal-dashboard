@@ -283,6 +283,7 @@ def init_db():
         for col, ddl in [
             ("address_verified", "INTEGER DEFAULT 0"),
             ("address_verified_at", "TEXT"),
+            ("email_enriched_method", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE msp_tracking ADD COLUMN {col} {ddl}")
@@ -783,7 +784,8 @@ def get_msp_tracking_map():
 
 
 def upsert_msp_tracking(contact_id, msp_verified=None, msp_verified_method=None,
-                         seniority_verified=None, email_enriched=None, address_verified=None):
+                         seniority_verified=None, email_enriched=None, email_enriched_method=None,
+                         address_verified=None):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as conn:
         row = conn.execute("SELECT contact_id FROM msp_tracking WHERE contact_id = ?", [contact_id]).fetchone()
@@ -797,8 +799,8 @@ def upsert_msp_tracking(contact_id, msp_verified=None, msp_verified_method=None,
             fields += ["seniority_verified = ?", "seniority_verified_at = ?"]
             values += [1 if seniority_verified else 0, now]
         if email_enriched is not None:
-            fields += ["email_enriched = ?", "email_enriched_at = ?"]
-            values += [1 if email_enriched else 0, now]
+            fields += ["email_enriched = ?", "email_enriched_method = ?", "email_enriched_at = ?"]
+            values += [1 if email_enriched else 0, email_enriched_method or "", now]
         if address_verified is not None:
             fields += ["address_verified = ?", "address_verified_at = ?"]
             values += [1 if address_verified else 0, now]
@@ -2694,6 +2696,7 @@ def msp_data_contacts():
             "seniority_verified": bool(t.get("seniority_verified")),
             "seniority_verified_at": t.get("seniority_verified_at") or "",
             "email_enriched": bool(t.get("email_enriched")),
+            "email_enriched_method": t.get("email_enriched_method") or "",
             "email_enriched_at": t.get("email_enriched_at") or "",
             "address_verified": bool(t.get("address_verified")),
             "address_verified_at": t.get("address_verified_at") or "",
@@ -2722,6 +2725,7 @@ def msp_data_track():
         msp_verified_method=body.get("msp_verified_method"),
         seniority_verified=body.get("seniority_verified"),
         email_enriched=body.get("email_enriched"),
+        email_enriched_method=body.get("email_enriched_method"),
         address_verified=body.get("address_verified"),
     )
     return jsonify({"ok": True})
@@ -2744,6 +2748,7 @@ def msp_data_track_bulk():
             msp_verified_method=item.get("msp_verified_method"),
             seniority_verified=item.get("seniority_verified"),
             email_enriched=item.get("email_enriched"),
+            email_enriched_method=item.get("email_enriched_method"),
             address_verified=item.get("address_verified"),
         )
         count += 1

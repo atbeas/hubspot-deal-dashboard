@@ -221,9 +221,10 @@ function verifiedPill(row) {
   return `<span class="pill pill-pending">Not checked</span>`;
 }
 
-function boolPill(flag, dateStr) {
-  if (flag) return `<span class="pill pill-good">Yes — ${fmtDate(dateStr)}</span>`;
-  return `<span class="pill pill-pending">No</span>`;
+function boolPill(flag, dateStr, method) {
+  const title = method ? ` title="${method.replace(/"/g, '&quot;')}"` : '';
+  if (flag) return `<span class="pill pill-good"${title}>Yes — ${fmtDate(dateStr)}</span>`;
+  return `<span class="pill pill-pending"${title}>No</span>`;
 }
 
 async function loadSummary() {
@@ -276,7 +277,7 @@ async function loadTable() {
         </td>
         <td>${verifiedPill(r)}</td>
         <td>${boolPill(r.seniority_verified, r.seniority_verified_at)}</td>
-        <td>${boolPill(r.email_enriched, r.email_enriched_at)}</td>
+        <td>${boolPill(r.email_enriched, r.email_enriched_at, r.email_enriched_method)}</td>
         <td>${r.email_enriched_at ? fmtDate(r.email_enriched_at) : '<span class="sub">Never</span>'}</td>
         <td>${boolPill(r.address_verified, r.address_verified_at)}</td>
         <td>${r.timezone || '<span class="sub">—</span>'}</td>
