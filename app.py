@@ -284,6 +284,9 @@ def init_db():
             ("address_verified", "INTEGER DEFAULT 0"),
             ("address_verified_at", "TEXT"),
             ("email_enriched_method", "TEXT DEFAULT ''"),
+            ("mobile_enriched", "INTEGER DEFAULT 0"),
+            ("mobile_enriched_at", "TEXT"),
+            ("mobile_enriched_method", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE msp_tracking ADD COLUMN {col} {ddl}")
@@ -785,7 +788,7 @@ def get_msp_tracking_map():
 
 def upsert_msp_tracking(contact_id, msp_verified=None, msp_verified_method=None,
                          seniority_verified=None, email_enriched=None, email_enriched_method=None,
-                         address_verified=None):
+                         address_verified=None, mobile_enriched=None, mobile_enriched_method=None):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as conn:
         row = conn.execute("SELECT contact_id FROM msp_tracking WHERE contact_id = ?", [contact_id]).fetchone()
@@ -804,6 +807,9 @@ def upsert_msp_tracking(contact_id, msp_verified=None, msp_verified_method=None,
         if address_verified is not None:
             fields += ["address_verified = ?", "address_verified_at = ?"]
             values += [1 if address_verified else 0, now]
+        if mobile_enriched is not None:
+            fields += ["mobile_enriched = ?", "mobile_enriched_method = ?", "mobile_enriched_at = ?"]
+            values += [1 if mobile_enriched else 0, mobile_enriched_method or "", now]
         if fields:
             fields.append("updated_at = ?")
             values.append(now)
@@ -2627,6 +2633,7 @@ def msp_data_summary():
     seniority_verified = 0
     email_enriched = 0
     address_verified = 0
+    mobile_enriched = 0
     for c in all_contacts:
         t = tracking.get(c["id"])
         st = (t["msp_verified"] if t and t["msp_verified"] else "") or "unverified"
@@ -2637,10 +2644,12 @@ def msp_data_summary():
             email_enriched += 1
         if t and t.get("address_verified"):
             address_verified += 1
+        if t and t.get("mobile_enriched"):
+            mobile_enriched += 1
     return jsonify({
         "total": len(all_contacts), "counts": counts,
         "seniority_verified": seniority_verified, "email_enriched": email_enriched,
-        "address_verified": address_verified,
+        "address_verified": address_verified, "mobile_enriched": mobile_enriched,
     })
 
 
@@ -2700,6 +2709,9 @@ def msp_data_contacts():
             "email_enriched_at": t.get("email_enriched_at") or "",
             "address_verified": bool(t.get("address_verified")),
             "address_verified_at": t.get("address_verified_at") or "",
+            "mobile_enriched": bool(t.get("mobile_enriched")),
+            "mobile_enriched_method": t.get("mobile_enriched_method") or "",
+            "mobile_enriched_at": t.get("mobile_enriched_at") or "",
             "timezone": c.get("hs_timezone") if c.get("hs_timezone") != "Unassigned" else "",
             "address": ", ".join(addr_parts),
             "owner": owners.get(c.get("hubspot_owner_id"), ""),
@@ -2727,6 +2739,8 @@ def msp_data_track():
         email_enriched=body.get("email_enriched"),
         email_enriched_method=body.get("email_enriched_method"),
         address_verified=body.get("address_verified"),
+        mobile_enriched=body.get("mobile_enriched"),
+        mobile_enriched_method=body.get("mobile_enriched_method"),
     )
     return jsonify({"ok": True})
 
@@ -2750,6 +2764,8 @@ def msp_data_track_bulk():
             email_enriched=item.get("email_enriched"),
             email_enriched_method=item.get("email_enriched_method"),
             address_verified=item.get("address_verified"),
+            mobile_enriched=item.get("mobile_enriched"),
+            mobile_enriched_method=item.get("mobile_enriched_method"),
         )
         count += 1
     return jsonify({"ok": True, "count": count})
