@@ -742,10 +742,13 @@ MSP_CONTACTS_CACHE_TTL = 600  # seconds
 
 
 def fetch_msp_contacts_live():
-    """Every contact currently tagged custom_industry=MSP, live from HubSpot.
-    This is the full population the MSP Data tab tracks cleanup progress
-    against -- verification state itself lives locally (msp_tracking),
-    joined onto this list by contact id."""
+    """Every contact currently tagged custom_industry=MSP, live from HubSpot,
+    PLUS any contact we've already processed (present in msp_tracking) even if
+    its custom_industry tag has since been cleared -- otherwise a contact we
+    confirm as NOT an MSP drops out of this query the moment we fix its tag,
+    and its verification history (and its contribution to the "Confirmed NOT
+    MSP" count) would vanish from the dashboard. Verification state itself
+    lives locally (msp_tracking), joined onto this list by contact id."""
     contacts = []
     after = None
     while True:
@@ -766,6 +769,23 @@ def fetch_msp_contacts_live():
         after = data.get("paging", {}).get("next", {}).get("after")
         if not after:
             break
+
+    seen_ids = {c["id"] for c in contacts}
+    with get_db() as conn:
+        tracked_ids = [r["contact_id"] for r in conn.execute("SELECT contact_id FROM msp_tracking").fetchall()]
+    missing_ids = [cid for cid in tracked_ids if cid not in seen_ids]
+    for chunk in _chunks(missing_ids, 100):
+        resp = requests.post(
+            f"{BASE_URL}/crm/v3/objects/contacts/batch/read",
+            headers=HEADERS,
+            json={"properties": MSP_CONTACT_PROPS, "inputs": [{"id": c} for c in chunk]},
+        )
+        if not resp.ok:
+            continue
+        for r in resp.json().get("results", []):
+            props = r.get("properties") or {}
+            contacts.append({"id": r["id"], **{k: (props.get(k) or "") for k in MSP_CONTACT_PROPS}})
+
     return contacts
 
 
