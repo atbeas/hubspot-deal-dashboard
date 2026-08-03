@@ -2771,6 +2771,24 @@ def msp_data_track_bulk():
     return jsonify({"ok": True, "count": count})
 
 
+@app.route("/api/msp-data/track/verify")
+def msp_data_track_verify():
+    if not msp_track_write_allowed():
+        return jsonify({"error": "unauthorized"}), 403
+    ids = [c for c in (request.args.get("ids") or "").split(",") if c]
+    tracking = get_msp_tracking_map()
+    if ids:
+        rows = {cid: tracking.get(cid) for cid in ids}
+    else:
+        rows = tracking
+    counts = {"yes": 0, "no": 0, "unverifiable": 0, "unverified": 0}
+    for cid in (ids or tracking.keys()):
+        t = tracking.get(cid)
+        st = (t["msp_verified"] if t and t["msp_verified"] else "") or "unverified"
+        counts[st] = counts.get(st, 0) + 1
+    return jsonify({"rows": rows, "counts": counts})
+
+
 @app.route("/api/msp-data/changelog")
 @tab_required('msp_data')
 def msp_data_changelog():
