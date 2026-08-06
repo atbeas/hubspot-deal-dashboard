@@ -769,7 +769,7 @@ function renderPushSummary() {
 async function preparePushPanel() {
   if (!document.getElementById('fSalesFocus').options.length) await loadHubspotOptions();
   if (!document.getElementById('fOwner').options.length) await loadOwners();
-  if (!document.getElementById('fSequence').options.length) await loadSequenceOptions();
+  if (document.getElementById('fSequence').options.length <= 1) await loadSequenceOptions();
   if (!document.getElementById('fTaskDue').value) {
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
