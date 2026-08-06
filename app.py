@@ -2633,10 +2633,17 @@ def _refresh_hubspot_status(conn, batch_id):
     email address -- surfaced next to the name on the Scrub/Enrich tables so
     Andrew can tell which of a person's possible duplicate HubSpot profiles
     he's looking at before deciding whether to keep/re-push them.
+
+    A 'not_found' result is re-checked every time (not treated as settled)
+    since a contact absent today can easily get pushed via a *different*
+    batch tomorrow -- a recurring saved search re-pulls the same people
+    across many batches, and only 'found' (with owner resolved) is a stable
+    answer worth skipping on future calls.
     """
     rows = conn.execute(
         """SELECT id, email FROM pull_candidates WHERE batch_id = ? AND email != ''
            AND (hubspot_status = 'unknown'
+                OR hubspot_status = 'not_found'
                 OR (hubspot_status = 'found' AND existing_owner_email = ''))""",
         [batch_id]
     ).fetchall()
