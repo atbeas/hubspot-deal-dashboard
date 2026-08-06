@@ -186,6 +186,10 @@ def init_db():
             conn.execute("ALTER TABLE pull_batches ADD COLUMN saved_search_id INTEGER")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE pull_batches ADD COLUMN archived_at TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS pull_candidates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3064,14 +3068,16 @@ def daily_pull_search(search_id):
 @app.route("/api/pull-contacts/batches")
 @tab_required('pull_contacts')
 def list_pull_batches():
+    show_archived = request.args.get("archived", "false").lower() == "true"
     with get_db() as conn:
-        rows = conn.execute("""
-            SELECT b.id, b.search_name, b.stage, b.created_at, b.total_entries, b.criteria_json,
+        rows = conn.execute(f"""
+            SELECT b.id, b.search_name, b.stage, b.created_at, b.total_entries, b.criteria_json, b.archived_at,
                    COUNT(c.id) AS total,
                    SUM(CASE WHEN c.keep = 1 THEN 1 ELSE 0 END) AS kept,
                    SUM(CASE WHEN c.pushed_at IS NOT NULL THEN 1 ELSE 0 END) AS pushed
             FROM pull_batches b
             LEFT JOIN pull_candidates c ON c.batch_id = b.id
+            WHERE b.archived_at IS {'NOT NULL' if show_archived else 'NULL'}
             GROUP BY b.id
             ORDER BY b.id DESC
             LIMIT 25
@@ -3087,8 +3093,28 @@ def list_pull_batches():
             "kept": r["kept"] or 0,
             "pushed": r["pushed"] or 0,
             "criteria": json.loads(r["criteria_json"]) if r["criteria_json"] else {},
+            "archived_at": r["archived_at"],
         } for r in rows
     ]})
+
+
+@app.route("/api/pull-contacts/batches/<int:batch_id>/archive", methods=["POST"])
+@tab_required('pull_contacts')
+def archive_pull_batch(batch_id):
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE pull_batches SET archived_at = ? WHERE id = ?",
+            [datetime.now(timezone.utc).isoformat(), batch_id]
+        )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/pull-contacts/batches/<int:batch_id>/unarchive", methods=["POST"])
+@tab_required('pull_contacts')
+def unarchive_pull_batch(batch_id):
+    with get_db() as conn:
+        conn.execute("UPDATE pull_batches SET archived_at = NULL WHERE id = ?", [batch_id])
+    return jsonify({"ok": True})
 
 
 @app.route("/api/pull-contacts/batches/<int:batch_id>")

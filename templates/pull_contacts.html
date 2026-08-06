@@ -159,7 +159,13 @@
     <div id="railList"></div>
     <button class="rail-new" id="newSearchBtn" type="button">+ New search</button>
 
-    <div class="rail-title" style="margin-top:24px">Past Pulls</div>
+    <div class="rail-title" style="margin-top:24px; display:flex; align-items:center; justify-content:space-between; gap:8px">
+      <span>Past Pulls</span>
+      <label style="font-size:.68rem; font-weight:500; color:#5c607a; display:flex; align-items:center; gap:4px; cursor:pointer">
+        <input type="checkbox" id="showArchivedPulls" onchange="loadPastBatches()" style="cursor:pointer">
+        Archived
+      </label>
+    </div>
     <div id="pastPullsList"></div>
   </div>
 
@@ -449,7 +455,8 @@ function stageLabel(stage) {
 }
 
 async function loadPastBatches() {
-  const resp = await fetch('/api/pull-contacts/batches');
+  const showArchived = document.getElementById('showArchivedPulls').checked;
+  const resp = await fetch(`/api/pull-contacts/batches?archived=${showArchived}`);
   const data = await resp.json();
   const list = document.getElementById('pastPullsList');
   list.innerHTML = data.batches.map(b => `
@@ -460,8 +467,19 @@ async function loadPastBatches() {
         <span class="rail-sub">${formatTimestamp(b.created_at)}</span>
         <span class="rail-sub rail-icp" title="${esc(summarizeCriteria(b.criteria))}">${esc(summarizeCriteria(b.criteria))}</span>
       </div>
+      <span class="del-x" title="${showArchived ? 'Unarchive' : 'Archive — hides this pull once it\\'s done'}" onclick="event.stopPropagation(); ${showArchived ? `unarchiveBatch(${b.id})` : `archiveBatch(${b.id})`}">${showArchived ? '↺' : '✓'}</span>
     </div>
-  `).join('') || '<div class="empty-hint" style="padding:10px 0">No pulls yet</div>';
+  `).join('') || `<div class="empty-hint" style="padding:10px 0">${showArchived ? 'No archived pulls' : 'No pulls yet'}</div>`;
+}
+
+async function archiveBatch(id) {
+  await fetch(`/api/pull-contacts/batches/${id}/archive`, {method: 'POST'});
+  loadPastBatches();
+}
+
+async function unarchiveBatch(id) {
+  await fetch(`/api/pull-contacts/batches/${id}/unarchive`, {method: 'POST'});
+  loadPastBatches();
 }
 
 async function resumeBatch(id) {
