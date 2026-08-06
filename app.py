@@ -853,6 +853,28 @@ def add_msp_changelog_entries(entries):
             ])
 
 
+def get_c_level_correction_counts():
+    """Buckets msp_changelog entries from C-level correction passes into
+    outcome categories by keyword, since the action text is free-form prose
+    rather than a fixed enum (entries pre-date this metric)."""
+    counts = {"title_corrected": 0, "redundant_removed": 0, "new_contact_created": 0, "flagged_manual": 0}
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT action FROM msp_changelog WHERE batch_label LIKE '%orrection pass%'"
+        ).fetchall()
+    for r in rows:
+        a = (r["action"] or "").lower()
+        if "flagged" in a or "follow-up" in a or "follow up" in a:
+            counts["flagged_manual"] += 1
+        elif "new contact" in a or "contact created" in a or "created" in a:
+            counts["new_contact_created"] += 1
+        elif "deleted" in a or "removed" in a:
+            counts["redundant_removed"] += 1
+        elif "corrected" in a:
+            counts["title_corrected"] += 1
+    return counts
+
+
 def get_msp_changelog_grouped():
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM msp_changelog ORDER BY created_at DESC, id DESC").fetchall()
@@ -2670,6 +2692,7 @@ def msp_data_summary():
         "total": len(all_contacts), "counts": counts,
         "seniority_verified": seniority_verified, "email_enriched": email_enriched,
         "address_verified": address_verified, "mobile_enriched": mobile_enriched,
+        "c_level_corrections": get_c_level_correction_counts(),
     })
 
 

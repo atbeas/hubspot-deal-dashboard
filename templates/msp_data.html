@@ -243,8 +243,18 @@ async function loadSummary() {
     {key: null, label: 'Mobile Enriched', num: data.mobile_enriched || 0, cls: 'good'},
     {key: null, label: 'Mailing Address Verified', num: data.address_verified || 0, cls: 'good'},
   ];
+  const cl = data.c_level_corrections || {};
+  const clTotal = (cl.title_corrected || 0) + (cl.redundant_removed || 0) + (cl.new_contact_created || 0) + (cl.flagged_manual || 0);
+  if (clTotal > 0) {
+    chips.push(
+      {key: null, label: 'C-Level Titles Corrected', num: cl.title_corrected || 0, cls: 'good', title: 'Non-senior contact turned out to actually be senior — jobtitle/name fixed in place'},
+      {key: null, label: 'Redundant Tasks Removed', num: cl.redundant_removed || 0, cls: '', title: 'Non-senior contact’s task deleted because the company already has a senior contact tracked'},
+      {key: null, label: 'New C-Level Contacts Added', num: cl.new_contact_created || 0, cls: 'good', title: 'Real decision-maker not previously in HubSpot — added as a new contact + task'},
+      {key: null, label: 'Flagged for Manual Follow-up', num: cl.flagged_manual || 0, cls: 'warn', title: 'Non-senior contact, no confirmed C-level replacement found — task left in place'},
+    );
+  }
   document.getElementById('summaryStrip').innerHTML = chips.map(c => `
-    <div class="summary-chip ${c.cls} ${c.key === currentStatus ? 'active' : ''}" ${c.key ? `data-status="${c.key}"` : ''}>
+    <div class="summary-chip ${c.cls} ${c.key === currentStatus ? 'active' : ''}" ${c.key ? `data-status="${c.key}"` : ''} ${c.title ? `title="${c.title}"` : ''}>
       <span class="num">${c.num.toLocaleString()}</span>${c.label}
     </div>
   `).join('');
@@ -345,12 +355,18 @@ function countActions(entries) {
   return counts;
 }
 
-function batchCountsLine(counts) {
+function batchCountsLine(counts, total) {
+  const classified = counts.confirmed_msp + counts.not_msp + counts.unverifiable;
+  if (classified < total) return `<b>${total}</b> change${total === 1 ? '' : 's'} logged`;
   return `<b>${counts.confirmed_msp}</b> confirmed MSP · <b>${counts.not_msp}</b> not MSP · <b>${counts.unverifiable}</b> unverifiable`;
 }
 
 function batchProseSummary(b, counts) {
   const total = b.entries.length;
+  const classified = counts.confirmed_msp + counts.not_msp + counts.unverifiable;
+  if (classified < total) {
+    return `${total} changes logged in this pass — see entries below for what happened to each contact.`;
+  }
   const parts = [];
   if (counts.confirmed_msp) parts.push(`<b>${counts.confirmed_msp}</b> were confirmed as genuine MSPs — time zone, address, city, and state were added and their outreach task was renamed`);
   if (counts.not_msp) parts.push(`<b>${counts.not_msp}</b> were confirmed NOT MSPs — the industry tag was corrected and their outreach task was removed`);
@@ -361,11 +377,24 @@ function batchProseSummary(b, counts) {
 function buildBatchSummaryText(b) {
   const counts = countActions(b.entries);
   const total = b.entries.length;
+  const classified = counts.confirmed_msp + counts.not_msp + counts.unverifiable;
   const lastTs = b.entries.length ? fmtDateTime(b.entries[0].created_at) : '';
   const lines = [];
   lines.push(`MSP Data Cleanup — ${b.batch_label}`);
   lines.push(`Completed: ${lastTs}`);
   lines.push('');
+
+  if (classified < total) {
+    lines.push(`Summary: ${total} changes logged in this pass.`);
+    lines.push('');
+    b.entries.forEach(e => {
+      lines.push(`• ${e.company || '(no company)'}${e.contact_name ? ' (' + e.contact_name + ')' : ''} — ${e.action || ''} — ${fmtDateTime(e.created_at)}`);
+      lines.push(`  ${e.detail || ''}`);
+      if (e.evidence) lines.push(`  Evidence: ${e.evidence}`);
+    });
+    return lines.join('\n').trim();
+  }
+
   lines.push(`Summary: ${total} contacts reviewed — ${counts.confirmed_msp} confirmed MSP, ${counts.not_msp} confirmed NOT MSP, ${counts.unverifiable} unverifiable (no changes made).`);
   lines.push('');
   const sections = [
@@ -417,7 +446,7 @@ async function loadChangelog() {
           <div>
             <div class="title">${b.batch_label || 'Unlabeled batch'}</div>
             <div class="meta">${b.entries.length} contacts · ${rangeLabel}</div>
-            <div class="counts">${batchCountsLine(counts)}</div>
+            <div class="counts">${batchCountsLine(counts, b.entries.length)}</div>
           </div>
           <div class="batch-header-actions">
             <button class="btn btn-ghost copy-batch-btn" data-batch-idx="${i}" type="button">⧉ Copy Summary</button>
