@@ -808,6 +808,17 @@ async function preparePushPanel() {
 }
 
 document.getElementById('continueToPushBtn').addEventListener('click', async () => {
+  // A contact with no email can't be pushed at all -- push_candidates_to_hubspot
+  // upserts by email and silently skips anything without one -- so drop those
+  // here unconditionally (not tied to the "Require email" checkbox, which is
+  // for the optional mobile/LinkedIn filters) rather than let them sit in Tag
+  // & Push looking pushable and then mysteriously push as 0.
+  const resp = await fetch(`/api/pull-contacts/batches/${currentBatchId}/filter-incomplete`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({require: ['email']})
+  });
+  const data = await resp.json();
+  currentCandidates = data.candidates;
   maxStageReached = 'push';
   await preparePushPanel();
   setStage('push');
