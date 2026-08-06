@@ -467,7 +467,7 @@ async function loadPastBatches() {
         <span class="rail-sub">${formatTimestamp(b.created_at)}</span>
         <span class="rail-sub rail-icp" title="${esc(summarizeCriteria(b.criteria))}">${esc(summarizeCriteria(b.criteria))}</span>
       </div>
-      <span class="del-x" title="${showArchived ? 'Unarchive' : 'Archive — hides this pull once it\\'s done'}" onclick="event.stopPropagation(); ${showArchived ? `unarchiveBatch(${b.id})` : `archiveBatch(${b.id})`}">${showArchived ? '↺' : '✓'}</span>
+      <span class="del-x" title="${showArchived ? 'Unarchive' : 'Archive this pull once its done'}" onclick="event.stopPropagation(); ${showArchived ? `unarchiveBatch(${b.id})` : `archiveBatch(${b.id})`}">${showArchived ? '↺' : '✓'}</span>
     </div>
   `).join('') || `<div class="empty-hint" style="padding:10px 0">${showArchived ? 'No archived pulls' : 'No pulls yet'}</div>`;
 }
