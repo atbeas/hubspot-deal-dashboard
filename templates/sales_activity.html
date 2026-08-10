@@ -60,26 +60,22 @@
     .btn-ghost { background: rgba(255,255,255,.06); color: #c9cad8; border: 1px solid #2a2d3e; }
     .btn-ghost:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
 
-    .legend { display: flex; gap: 18px; margin-bottom: 14px; font-size: .78rem; color: #8b8fa8; }
+    .legend { display: flex; gap: 16px; margin-bottom: 14px; font-size: .78rem; color: #8b8fa8; flex-wrap: wrap; }
     .legend-item { display: flex; align-items: center; gap: 7px; }
-    .legend-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+    .legend-key { width: 14px; height: 2px; border-radius: 1px; display: inline-block; flex-shrink: 0; }
 
-    .leaderboard { display: flex; flex-direction: column; gap: 10px; }
-    .lb-row { display: flex; align-items: center; gap: 10px; font-size: .84rem; }
-    .lb-row .name { width: 180px; color: #c9cad8; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .lb-row .bar-track { flex: 1; background: #14151f; height: 14px; overflow: hidden; }
-    .lb-row .bar-fill-wrap {
-      height: 100%; display: flex; overflow: hidden;
-      border-top-right-radius: 4px; border-bottom-right-radius: 4px;
+    .line-chart {
+      background: linear-gradient(180deg, #1a1c2c 0%, #14151f 100%);
+      border-radius: 8px; padding: 6px 4px 0; position: relative;
     }
-    .lb-row .bar-seg {
-      height: 100%; cursor: pointer; transition: filter .1s;
-    }
-    .lb-row .bar-seg:not(:last-child) { margin-right: 2px; }
-    .lb-row .bar-seg:hover, .lb-row .bar-seg:focus-visible {
-      filter: brightness(1.2); outline: none;
-    }
-    .lb-row .count { width: 40px; text-align: right; color: #e8e9f0; font-weight: 600; }
+    .line-chart svg { width: 100%; height: 300px; display: block; overflow: visible; }
+    .line-chart .gridline { stroke: #22243a; stroke-width: 1; }
+    .line-chart .axis-label { fill: #5c607a; font-size: 10.5px; font-family: 'Inter', sans-serif; }
+    .line-chart .series-line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .line-chart .crosshair-line { stroke: #3a3d52; stroke-width: 1; pointer-events: none; }
+    .line-chart .hover-dot { stroke: #14151f; stroke-width: 2; pointer-events: none; }
+    .line-chart .hit-layer { fill: transparent; }
+    .line-chart .hit-layer:hover { cursor: crosshair; }
 
     .chart-tooltip {
       position: fixed; pointer-events: none; z-index: 1000;
@@ -155,8 +151,8 @@
 
   <div class="panel">
     <h2>By Rep</h2>
-    <div class="legend" id="chartLegend"></div>
-    <div class="leaderboard" id="leaderboard"></div>
+    <div class="legend" id="repLegend"></div>
+    <div class="line-chart" id="repLineChart"></div>
   </div>
 
   <div class="panel">
@@ -234,8 +230,6 @@ async function loadSummary() {
     </div>
   `).join('');
 
-  renderLeaderboard(data.leaderboard || []);
-
   const ownerSelect = document.getElementById('ownerFilter');
   const prevVal = ownerSelect.value;
   ownerSelect.innerHTML = '';
@@ -252,58 +246,46 @@ async function loadSummary() {
   ownerSelect.value = prevVal;
 }
 
-const SERIES = [
-  {key: 'calls', label: 'Calls', color: 'var(--series-call)'},
-  {key: 'emails', label: 'Emails', color: 'var(--series-email)'},
-  {key: 'meetings', label: 'Meetings', color: 'var(--series-meeting)'},
-];
-
-function renderLegend() {
-  const el = document.getElementById('chartLegend');
-  el.innerHTML = '';
-  SERIES.forEach(s => {
-    const item = document.createElement('div');
-    item.className = 'legend-item';
-    const swatch = document.createElement('span');
-    swatch.className = 'legend-swatch';
-    swatch.style.background = s.color;
-    const text = document.createElement('span');
-    text.textContent = s.label;
-    item.appendChild(swatch);
-    item.appendChild(text);
-    el.appendChild(item);
-  });
-}
+// Fixed 8-hue categorical order (validated: node scripts/validate_palette.js
+// "#3987e5,#d95926,#199e70,#c98500,#d55181,#008300,#9085e9,#e66767"
+// --mode dark --surface "#1e2030" -> ALL CHECKS PASS, adjacent pairlist,
+// which is the right check for a multi-line chart). Assigned by rank (most
+// total activity first) so the busiest rep always lands on slot 1. A 9th+
+// rep folds into a single muted "Other reps" line rather than a 9th hue.
+const REP_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
+const OTHER_REPS_COLOR = '#5c607a';
 
 const chartTooltip = document.createElement('div');
 chartTooltip.className = 'chart-tooltip';
 document.body.appendChild(chartTooltip);
 
-function showChartTooltip(x, y, ownerName, seg) {
+function showMultiTooltip(x, y, title, rows) {
   chartTooltip.innerHTML = '';
-  const nameEl = document.createElement('div');
-  nameEl.className = 'tt-name';
-  nameEl.textContent = ownerName;
-  const row = document.createElement('div');
-  row.className = 'tt-row';
-  const key = document.createElement('span');
-  key.className = 'tt-key';
-  key.style.background = seg.color;
-  const value = document.createElement('span');
-  value.className = 'tt-value';
-  value.textContent = seg.count.toLocaleString();
-  const label = document.createElement('span');
-  label.className = 'tt-label';
-  label.textContent = seg.label;
-  row.appendChild(key);
-  row.appendChild(value);
-  row.appendChild(label);
-  chartTooltip.appendChild(nameEl);
-  chartTooltip.appendChild(row);
+  const titleEl = document.createElement('div');
+  titleEl.className = 'tt-name';
+  titleEl.textContent = title;
+  chartTooltip.appendChild(titleEl);
+  rows.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'tt-row';
+    const key = document.createElement('span');
+    key.className = 'tt-key';
+    key.style.background = r.color;
+    const value = document.createElement('span');
+    value.className = 'tt-value';
+    value.textContent = r.count.toLocaleString();
+    const label = document.createElement('span');
+    label.className = 'tt-label';
+    label.textContent = r.label;
+    row.appendChild(key);
+    row.appendChild(value);
+    row.appendChild(label);
+    chartTooltip.appendChild(row);
+  });
 
   const vw = window.innerWidth;
   let left = x + 14;
-  if (left + 220 > vw) left = x - 220;
+  if (left + 240 > vw) left = x - 240;
   chartTooltip.style.left = `${Math.max(4, left)}px`;
   chartTooltip.style.top = `${y + 14}px`;
   chartTooltip.classList.add('visible');
@@ -313,63 +295,170 @@ function hideChartTooltip() {
   chartTooltip.classList.remove('visible');
 }
 
-function renderLeaderboard(lb) {
-  const container = document.getElementById('leaderboard');
+function fmtAxisDate(dateStr) {
+  return new Date(`${dateStr}T00:00:00Z`).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
+}
+
+function niceMax(value) {
+  if (value <= 0) return 10;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(value)));
+  const normalized = value / magnitude;
+  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return step * magnitude;
+}
+
+async function loadTimeline() {
+  const resp = await fetch(`/api/sales-activity/timeline?days=${currentDays}`);
+  const data = await resp.json();
+  renderLineChart(data);
+}
+
+function renderLineChart(data) {
+  const container = document.getElementById('repLineChart');
+  const legendEl = document.getElementById('repLegend');
   container.innerHTML = '';
-  if (!lb.length) {
+  legendEl.innerHTML = '';
+
+  const repsAll = data.reps || [];
+  if (!repsAll.length) {
     container.innerHTML = `<div class="empty-hint">No activity in this window.</div>`;
     return;
   }
-  const maxTotal = Math.max(1, ...lb.map(r => r.total));
 
-  lb.forEach(r => {
-    const row = document.createElement('div');
-    row.className = 'lb-row';
-
-    const name = document.createElement('span');
-    name.className = 'name';
-    name.textContent = r.owner;
-    row.appendChild(name);
-
-    const track = document.createElement('div');
-    track.className = 'bar-track';
-    const wrap = document.createElement('div');
-    wrap.className = 'bar-fill-wrap';
-    wrap.style.width = `${(r.total / maxTotal * 100).toFixed(1)}%`;
-
-    SERIES.forEach(s => {
-      const count = r[s.key] || 0;
-      if (!count) return;
-      const seg = document.createElement('div');
-      seg.className = 'bar-seg';
-      seg.style.background = s.color;
-      seg.style.flex = `${count} 0 auto`;
-      seg.tabIndex = 0;
-      seg.setAttribute('aria-label', `${r.owner}: ${count.toLocaleString()} ${s.label}`);
-      const segInfo = {label: s.label, count, color: s.color};
-      const onShow = (ev) => showChartTooltip(ev.clientX, ev.clientY, r.owner, segInfo);
-      const onFocus = () => {
-        const rect = seg.getBoundingClientRect();
-        showChartTooltip(rect.right, rect.top, r.owner, segInfo);
-      };
-      seg.addEventListener('mouseenter', onShow);
-      seg.addEventListener('mousemove', onShow);
-      seg.addEventListener('mouseleave', hideChartTooltip);
-      seg.addEventListener('focus', onFocus);
-      seg.addEventListener('blur', hideChartTooltip);
-      wrap.appendChild(seg);
-    });
-
-    track.appendChild(wrap);
-    row.appendChild(track);
-
-    const count = document.createElement('span');
-    count.className = 'count';
-    count.textContent = r.total.toLocaleString();
-    row.appendChild(count);
-
-    container.appendChild(row);
+  const days = data.days;
+  const startMs = Date.parse(`${data.start_date}T00:00:00Z`);
+  const dates = Array.from({length: days}, (_, i) => {
+    const d = new Date(startMs + i * 86400000);
+    return d.toISOString().slice(0, 10);
   });
+
+  // Daily total per rep (sum across calls/emails/meetings) -- comparable
+  // across reps on one shared scale, per Andrew's request.
+  const dailyByOwner = {};
+  repsAll.forEach(o => { dailyByOwner[o] = new Array(days).fill(0); });
+  const dateIndex = {};
+  dates.forEach((d, i) => { dateIndex[d] = i; });
+  (data.points || []).forEach(p => {
+    const idx = dateIndex[p.date];
+    if (idx === undefined || !dailyByOwner[p.owner]) return;
+    dailyByOwner[p.owner][idx] += p.count;
+  });
+
+  // Slot 1..8 by total volume; anything past the 8th rep folds into "Other".
+  const ranked = [...repsAll]; // already sorted by total desc from the backend
+  const directReps = ranked.slice(0, 8);
+  const otherReps = ranked.slice(8);
+
+  const series = directReps.map((owner, i) => ({owner, color: REP_COLORS[i], values: dailyByOwner[owner]}));
+  if (otherReps.length) {
+    const combined = new Array(days).fill(0);
+    otherReps.forEach(o => dailyByOwner[o].forEach((v, i) => { combined[i] += v; }));
+    series.push({owner: `Other reps (${otherReps.length})`, color: OTHER_REPS_COLOR, values: combined});
+  }
+
+  series.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    const key = document.createElement('span');
+    key.className = 'legend-key';
+    key.style.background = s.color;
+    const text = document.createElement('span');
+    text.textContent = s.owner;
+    item.appendChild(key);
+    item.appendChild(text);
+    legendEl.appendChild(item);
+  });
+
+  const maxVal = niceMax(Math.max(1, ...series.flatMap(s => s.values)));
+
+  const W = 1000, H = 300, padTop = 14, padBottom = 30, padLeft = 4, padRight = 4;
+  const plotTop = padTop, plotBottom = H - padBottom, plotLeft = padLeft, plotRight = W - padRight;
+  const xFor = (i) => days > 1 ? plotLeft + (i / (days - 1)) * (plotRight - plotLeft) : (plotLeft + plotRight) / 2;
+  const yFor = (v) => plotBottom - (v / maxVal) * (plotBottom - plotTop);
+
+  const svgParts = [];
+  // Gridlines + y labels at 0/25/50/75/100% of maxVal.
+  for (let f = 0; f <= 1; f += 0.25) {
+    const y = yFor(maxVal * f);
+    svgParts.push(`<line class="gridline" x1="${plotLeft}" y1="${y}" x2="${plotRight}" y2="${y}" />`);
+    svgParts.push(`<text class="axis-label" x="${plotLeft}" y="${y - 4}">${Math.round(maxVal * f).toLocaleString()}</text>`);
+  }
+  // X-axis date ticks.
+  const tickCount = Math.min(6, days);
+  for (let i = 0; i < tickCount; i++) {
+    const idx = tickCount > 1 ? Math.round((i * (days - 1)) / (tickCount - 1)) : 0;
+    const d = new Date(startMs + idx * 86400000);
+    const label = d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+    const x = xFor(idx);
+    const anchor = idx === 0 ? 'start' : idx === days - 1 ? 'end' : 'middle';
+    svgParts.push(`<text class="axis-label" x="${x}" y="${H - 8}" text-anchor="${anchor}">${label}</text>`);
+  }
+  // One polyline per series.
+  series.forEach(s => {
+    const pts = s.values.map((v, i) => `${xFor(i)},${yFor(v)}`).join(' ');
+    svgParts.push(`<polyline class="series-line" points="${pts}" stroke="${s.color}" />`);
+  });
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.innerHTML = svgParts.join('');
+
+  // Hover layer: crosshair + hover dots + one tooltip listing every series.
+  const crosshair = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  crosshair.setAttribute('class', 'crosshair-line');
+  crosshair.setAttribute('y1', String(plotTop));
+  crosshair.setAttribute('y2', String(plotBottom));
+  crosshair.style.display = 'none';
+  svg.appendChild(crosshair);
+
+  const hoverDots = series.map(s => {
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('class', 'hover-dot');
+    c.setAttribute('r', '4');
+    c.setAttribute('fill', s.color);
+    c.style.display = 'none';
+    svg.appendChild(c);
+    return c;
+  });
+
+  const hitLayer = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  hitLayer.setAttribute('class', 'hit-layer');
+  hitLayer.setAttribute('x', String(plotLeft));
+  hitLayer.setAttribute('y', String(plotTop));
+  hitLayer.setAttribute('width', String(plotRight - plotLeft));
+  hitLayer.setAttribute('height', String(plotBottom - plotTop));
+
+  const onMove = (ev) => {
+    const rect = svg.getBoundingClientRect();
+    const svgX = ((ev.clientX - rect.left) / rect.width) * W;
+    const dayIdx = days > 1
+      ? Math.max(0, Math.min(days - 1, Math.round(((svgX - plotLeft) / (plotRight - plotLeft)) * (days - 1))))
+      : 0;
+    const x = xFor(dayIdx);
+    crosshair.setAttribute('x1', String(x));
+    crosshair.setAttribute('x2', String(x));
+    crosshair.style.display = '';
+
+    const rows = series.map((s, i) => {
+      hoverDots[i].setAttribute('cx', String(x));
+      hoverDots[i].setAttribute('cy', String(yFor(s.values[dayIdx])));
+      hoverDots[i].style.display = '';
+      return {label: s.owner, count: s.values[dayIdx], color: s.color};
+    }).sort((a, b) => b.count - a.count);
+
+    showMultiTooltip(ev.clientX, ev.clientY, fmtAxisDate(dates[dayIdx]), rows);
+  };
+  const onLeave = () => {
+    crosshair.style.display = 'none';
+    hoverDots.forEach(d => d.style.display = 'none');
+    hideChartTooltip();
+  };
+  hitLayer.addEventListener('mousemove', onMove);
+  hitLayer.addEventListener('mouseleave', onLeave);
+  svg.appendChild(hitLayer);
+
+  container.appendChild(svg);
 }
 
 async function loadTable() {
@@ -412,6 +501,7 @@ document.getElementById('daysFilter').addEventListener('change', (e) => {
   currentDays = parseInt(e.target.value, 10);
   currentPage = 1;
   loadSummary();
+  loadTimeline();
   loadTable();
 });
 
@@ -440,14 +530,15 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
   document.getElementById('loadingHint').textContent = 'Refreshing from HubSpot…';
   await fetch(`/api/sales-activity/summary?days=${currentDays}&refresh=1`);
   await loadSummary();
+  await loadTimeline();
   await loadTable();
 });
 
 document.getElementById('prevPage').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadTable(); } });
 document.getElementById('nextPage').addEventListener('click', () => { currentPage++; loadTable(); });
 
-renderLegend();
 loadSummary();
+loadTimeline();
 loadTable();
 </script>
 
