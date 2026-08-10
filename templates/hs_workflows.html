@@ -106,6 +106,7 @@
   <div class="header-nav">
     {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
     {% if current_user.is_owner or 'msp_data' in current_user.tabs %}<a href="/msp-data" class="nav-link">MSP Data</a>{% endif %}
+    {% if current_user.is_owner or 'sales_activity' in current_user.tabs %}<a href="/sales-activity" class="nav-link">Sales Activity</a>{% endif %}
     {% if current_user.is_owner or 'dashboard' in current_user.tabs %}<a href="/" class="nav-link">← Deal Alloc</a>{% endif %}
     <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
     <a href="/hs-workflows" class="nav-link active">HS Workflows</a>

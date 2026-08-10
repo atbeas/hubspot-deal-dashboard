@@ -24,6 +24,7 @@ TAB_DEFS = [
     ("hs_workflows",  "HS Workflows"),
     ("pull_contacts", "Pull Contacts"),
     ("msp_data",      "MSP Data"),
+    ("sales_activity", "Sales Activity"),
     ("admin",         "Admin"),
 ]
 TAB_KEYS = [key for key, _ in TAB_DEFS]
@@ -489,6 +490,7 @@ def first_accessible_url(user):
         if user_has_tab(user, key):
             return url_for({"dashboard": "index", "hs_workflows": "hs_workflows_page",
                             "pull_contacts": "pull_contacts_page", "msp_data": "msp_data_page",
+                            "sales_activity": "sales_activity_page",
                             "admin": "admin"}[key])
     return url_for("no_access")
 
@@ -2857,6 +2859,263 @@ def msp_data_changelog_bulk():
     entries = body.get("entries") or []
     add_msp_changelog_entries(entries)
     return jsonify({"ok": True, "count": len(entries)})
+
+
+# Sales Activity — calls/emails/meetings logged in HubSpot against any contact
+# tagged sales_focus = "Runway Selling". Rather than walking all ~8,000 RS
+# contacts (too expensive), we search engagement objects directly by their
+# own hs_timestamp within the selected window (a few hundred-thousand
+# engagements/year portal-wide, but only ~1-2k/month), then batch-check each
+# engagement's associated contact against a cached set of RS contact ids.
+RS_SALES_FOCUS_VALUE = "Runway Selling"
+
+CALL_DIRECTION_LABELS = {"INBOUND": "Inbound", "OUTBOUND": "Outbound"}
+CALL_STATUS_LABELS = {
+    "BUSY": "Busy", "CALLING_CRM_USER": "Calling CRM User", "CANCELED": "Canceled",
+    "COMPLETED": "Completed", "CONNECTING": "Connecting", "FAILED": "Failed",
+    "IN_PROGRESS": "In Progress", "MISSED": "Missed", "NO_ANSWER": "No Answer",
+    "QUEUED": "Queued", "RINGING": "Ringing", "HOLD": "On Hold",
+}
+EMAIL_DIRECTION_LABELS = {
+    "FORWARDED_EMAIL": "Forwarded", "INCOMING_EMAIL": "Incoming",
+    "EMAIL": "Outgoing", "DRAFT_EMAIL": "Draft",
+}
+MEETING_OUTCOME_LABELS = {
+    "SCHEDULED": "Scheduled", "COMPLETED": "Completed", "RESCHEDULED": "Rescheduled",
+    "NO_SHOW": "No Show", "CANCELED": "Canceled",
+}
+
+ENGAGEMENT_TYPES = {
+    "calls": {
+        "label": "Call",
+        "properties": ["hs_timestamp", "hubspot_owner_id", "hs_call_direction", "hs_call_status", "hs_call_title"],
+    },
+    "emails": {
+        "label": "Email",
+        "properties": ["hs_timestamp", "hubspot_owner_id", "hs_email_direction", "hs_email_subject"],
+    },
+    "meetings": {
+        "label": "Meeting",
+        "properties": ["hs_timestamp", "hubspot_owner_id", "hs_meeting_outcome", "hs_meeting_title"],
+    },
+}
+
+RS_CONTACT_PROPS = ["firstname", "lastname", "email", "company", "hubspot_owner_id"]
+_RS_CONTACTS_CACHE = {"data": None, "ts": 0}
+RS_CONTACTS_CACHE_TTL = 3600  # seconds -- ~8k contacts, doesn't need to be fresh-to-the-minute
+
+
+def fetch_rs_contacts_live():
+    """id -> display info, for every contact tagged sales_focus = Runway Selling."""
+    contacts = {}
+    after = None
+    while True:
+        body = {
+            "filterGroups": [{"filters": [{"propertyName": "sales_focus", "operator": "EQ", "value": RS_SALES_FOCUS_VALUE}]}],
+            "properties": RS_CONTACT_PROPS,
+            "limit": 200,
+        }
+        if after:
+            body["after"] = after
+        resp = requests.post(f"{BASE_URL}/crm/v3/objects/contacts/search", headers=HEADERS, json=body, timeout=30)
+        if not resp.ok:
+            break
+        data = resp.json()
+        for r in data.get("results", []):
+            props = r.get("properties") or {}
+            contacts[r["id"]] = {
+                "name": f"{props.get('firstname','')} {props.get('lastname','')}".strip(),
+                "email": props.get("email", ""),
+                "company": props.get("company", ""),
+                "owner_id": props.get("hubspot_owner_id", ""),
+            }
+        after = data.get("paging", {}).get("next", {}).get("after")
+        if not after:
+            break
+    return contacts
+
+
+def get_rs_contacts_cached(force=False):
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _RS_CONTACTS_CACHE["data"]
+    if not force and cached and (now_ts - _RS_CONTACTS_CACHE["ts"] < RS_CONTACTS_CACHE_TTL):
+        return cached
+    contacts = fetch_rs_contacts_live()
+    _RS_CONTACTS_CACHE["data"] = contacts
+    _RS_CONTACTS_CACHE["ts"] = now_ts
+    return contacts
+
+
+def fetch_engagements_in_range(obj_type, start_ms, end_ms, properties):
+    results = []
+    after = None
+    while True:
+        body = {
+            "filterGroups": [{"filters": [
+                {"propertyName": "hs_timestamp", "operator": "GTE", "value": start_ms},
+                {"propertyName": "hs_timestamp", "operator": "LT", "value": end_ms},
+            ]}],
+            "properties": properties,
+            "limit": 200,
+            "sorts": [{"propertyName": "hs_timestamp", "direction": "DESCENDING"}],
+        }
+        if after:
+            body["after"] = after
+        resp = requests.post(f"{BASE_URL}/crm/v3/objects/{obj_type}/search", headers=HEADERS, json=body, timeout=30)
+        if not resp.ok:
+            break
+        data = resp.json()
+        results.extend(data.get("results", []))
+        after = data.get("paging", {}).get("next", {}).get("after")
+        if not after:
+            break
+    return results
+
+
+def get_engagement_contact_map(obj_type, engagement_ids):
+    """engagement id -> [contact id, ...] via v4 associations batch/read."""
+    mapping = {}
+    for chunk in _chunks(engagement_ids, 100):
+        if not chunk:
+            continue
+        resp = requests.post(
+            f"{BASE_URL}/crm/v4/associations/{obj_type}/contacts/batch/read",
+            headers=HEADERS, json={"inputs": [{"id": eid} for eid in chunk]}, timeout=30,
+        )
+        if not resp.ok:
+            continue
+        for r in resp.json().get("results", []):
+            eid = str(r.get("from", {}).get("id", ""))
+            mapping[eid] = [str(t["toObjectId"]) for t in r.get("to", [])]
+    return mapping
+
+
+_SALES_ACTIVITY_CACHE = {}
+SALES_ACTIVITY_CACHE_TTL = 300  # seconds
+
+
+def get_sales_activity(days=30, force=False):
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _SALES_ACTIVITY_CACHE.get(days)
+    if not force and cached and (now_ts - cached["ts"] < SALES_ACTIVITY_CACHE_TTL):
+        return cached["data"]
+
+    rs_contacts = get_rs_contacts_cached(force=force)
+
+    # End is midnight tomorrow (exclusive, via LT) so "today" is fully
+    # included without the LTE-on-a-day-boundary trap that silently drops
+    # same-day records -- see the HubSpot date-range LTE memory.
+    end = (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = end - timedelta(days=days + 1)
+    start_ms = int(start.timestamp() * 1000)
+    end_ms = int(end.timestamp() * 1000)
+
+    owners = {o["id"]: o["name"] for o in fetch_hubspot_owners()}
+
+    activities = []
+    for obj_type, cfg in ENGAGEMENT_TYPES.items():
+        raw = fetch_engagements_in_range(obj_type, start_ms, end_ms, cfg["properties"])
+        assoc = get_engagement_contact_map(obj_type, [r["id"] for r in raw])
+        for r in raw:
+            cids = assoc.get(r["id"], [])
+            rs_cid = next((c for c in cids if c in rs_contacts), None)
+            if not rs_cid:
+                continue
+            props = r.get("properties") or {}
+            contact = rs_contacts[rs_cid]
+
+            if obj_type == "calls":
+                detail = f"{CALL_DIRECTION_LABELS.get(props.get('hs_call_direction'), props.get('hs_call_direction') or '—')} · {CALL_STATUS_LABELS.get(props.get('hs_call_status'), props.get('hs_call_status') or '')}"
+                note = props.get("hs_call_title") or ""
+            elif obj_type == "emails":
+                detail = EMAIL_DIRECTION_LABELS.get(props.get("hs_email_direction"), props.get("hs_email_direction") or "—")
+                note = props.get("hs_email_subject") or ""
+            else:
+                detail = MEETING_OUTCOME_LABELS.get(props.get("hs_meeting_outcome"), props.get("hs_meeting_outcome") or "—")
+                note = props.get("hs_meeting_title") or ""
+
+            activities.append({
+                "id": r["id"],
+                "type": obj_type,
+                "type_label": cfg["label"],
+                "timestamp": props.get("hs_timestamp") or "",
+                "owner": owners.get(props.get("hubspot_owner_id", ""), "") or "Unassigned",
+                "contact_id": rs_cid,
+                "contact_name": contact["name"],
+                "company": contact["company"],
+                "detail": detail,
+                "note": note,
+                "hubspot_url": f"https://app.hubspot.com/contacts/23416553/record/0-1/{rs_cid}",
+            })
+
+    activities.sort(key=lambda a: a["timestamp"], reverse=True)
+    _SALES_ACTIVITY_CACHE[days] = {"data": activities, "ts": now_ts}
+    return activities
+
+
+@app.route("/sales-activity")
+@tab_required('sales_activity')
+def sales_activity_page():
+    return render_template("sales_activity.html")
+
+
+@app.route("/api/sales-activity/summary")
+@tab_required('sales_activity')
+def sales_activity_summary():
+    days = max(1, min(180, int(request.args.get("days", 30) or 30)))
+    activities = get_sales_activity(days=days, force=request.args.get("refresh") == "1")
+
+    by_type = {"calls": 0, "emails": 0, "meetings": 0}
+    by_owner = {}
+    contacts_touched = set()
+    for a in activities:
+        by_type[a["type"]] = by_type.get(a["type"], 0) + 1
+        by_owner[a["owner"]] = by_owner.get(a["owner"], 0) + 1
+        contacts_touched.add(a["contact_id"])
+
+    leaderboard = sorted(
+        [{"owner": o, "count": c} for o, c in by_owner.items()],
+        key=lambda x: x["count"], reverse=True,
+    )
+
+    return jsonify({
+        "days": days,
+        "total": len(activities),
+        "by_type": by_type,
+        "unique_contacts": len(contacts_touched),
+        "leaderboard": leaderboard,
+    })
+
+
+@app.route("/api/sales-activity/feed")
+@tab_required('sales_activity')
+def sales_activity_feed():
+    days = max(1, min(180, int(request.args.get("days", 30) or 30)))
+    activity_type = request.args.get("type", "all")
+    owner = request.args.get("owner", "all")
+    q = (request.args.get("q") or "").strip().lower()
+    page = max(1, int(request.args.get("page", 1) or 1))
+    per_page = min(200, max(1, int(request.args.get("per_page", 50) or 50)))
+
+    activities = get_sales_activity(days=days, force=request.args.get("refresh") == "1")
+
+    filtered = []
+    for a in activities:
+        if activity_type != "all" and a["type"] != activity_type:
+            continue
+        if owner != "all" and a["owner"] != owner:
+            continue
+        if q:
+            hay = f"{a['company']} {a['contact_name']} {a['note']}".lower()
+            if q not in hay:
+                continue
+        filtered.append(a)
+
+    total = len(filtered)
+    start = (page - 1) * per_page
+    rows = filtered[start:start + per_page]
+
+    return jsonify({"total": total, "page": page, "per_page": per_page, "rows": rows})
 
 
 @app.route("/api/pull-contacts/searches")

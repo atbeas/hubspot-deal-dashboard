@@ -418,6 +418,7 @@
   <div class="header-nav">
     {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
     {% if current_user.is_owner or 'msp_data' in current_user.tabs %}<a href="/msp-data" class="nav-link">MSP Data</a>{% endif %}
+    {% if current_user.is_owner or 'sales_activity' in current_user.tabs %}<a href="/sales-activity" class="nav-link">Sales Activity</a>{% endif %}
     <a href="/" class="nav-link active">Deal Alloc</a>
     {% if current_user.is_owner or 'archived' in current_user.tabs %}<a href="#" class="nav-link" id="archiveTabLink" onclick="toggleArchiveView(event)">Archived Deals</a>{% endif %}
     <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
