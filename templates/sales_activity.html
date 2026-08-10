@@ -63,6 +63,20 @@
     .legend { display: flex; gap: 16px; margin-bottom: 14px; font-size: .78rem; color: #8b8fa8; flex-wrap: wrap; }
     .legend-item { display: flex; align-items: center; gap: 7px; }
     .legend-key { width: 14px; height: 2px; border-radius: 1px; display: inline-block; flex-shrink: 0; }
+    .legend-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+
+    .type-chart { display: flex; flex-direction: column; gap: 10px; }
+    .type-row { display: flex; align-items: center; gap: 10px; font-size: .84rem; }
+    .type-row .name { width: 170px; color: #c9cad8; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .type-row .bar-track { flex: 1; background: #14151f; height: 14px; overflow: hidden; }
+    .type-row .bar-fill-wrap {
+      height: 100%; display: flex; overflow: hidden;
+      border-top-right-radius: 4px; border-bottom-right-radius: 4px;
+    }
+    .type-row .bar-seg { height: 100%; cursor: pointer; transition: filter .1s; }
+    .type-row .bar-seg:not(:last-child) { margin-right: 2px; }
+    .type-row .bar-seg:hover, .type-row .bar-seg:focus-visible { filter: brightness(1.2); outline: none; }
+    .type-row .total { width: 50px; text-align: right; color: #e8e9f0; font-weight: 600; }
 
     .line-chart {
       background: linear-gradient(180deg, #1a1c2c 0%, #14151f 100%);
@@ -156,6 +170,12 @@
   </div>
 
   <div class="panel">
+    <h2>By Rep — By Activity Type</h2>
+    <div class="legend" id="typeLegend"></div>
+    <div class="type-chart" id="typeChart"></div>
+  </div>
+
+  <div class="panel">
     <div class="toolbar">
       <input type="text" id="searchBox" placeholder="Search company, contact, or subject..." />
       <select id="typeFilter">
@@ -244,6 +264,91 @@ async function loadSummary() {
     ownerSelect.appendChild(opt);
   });
   ownerSelect.value = prevVal;
+
+  renderTypeLegend();
+  renderTypeChart(data.leaderboard || []);
+}
+
+const TYPE_SERIES = [
+  {key: 'calls', label: 'Calls', color: 'var(--series-call)'},
+  {key: 'emails', label: 'Emails', color: 'var(--series-email)'},
+  {key: 'meetings', label: 'Meetings', color: 'var(--series-meeting)'},
+];
+
+function renderTypeLegend() {
+  const el = document.getElementById('typeLegend');
+  el.innerHTML = '';
+  TYPE_SERIES.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    const swatch = document.createElement('span');
+    swatch.className = 'legend-swatch';
+    swatch.style.background = s.color;
+    const text = document.createElement('span');
+    text.textContent = s.label;
+    item.appendChild(swatch);
+    item.appendChild(text);
+    el.appendChild(item);
+  });
+}
+
+function renderTypeChart(leaderboard) {
+  const container = document.getElementById('typeChart');
+  container.innerHTML = '';
+  if (!leaderboard.length) {
+    container.innerHTML = `<div class="empty-hint">No activity in this window.</div>`;
+    return;
+  }
+  const maxTotal = Math.max(1, ...leaderboard.map(r => r.total));
+
+  leaderboard.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'type-row';
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = r.owner;
+    row.appendChild(name);
+
+    const track = document.createElement('div');
+    track.className = 'bar-track';
+    const wrap = document.createElement('div');
+    wrap.className = 'bar-fill-wrap';
+    wrap.style.width = `${(r.total / maxTotal * 100).toFixed(1)}%`;
+
+    TYPE_SERIES.forEach(s => {
+      const count = r[s.key] || 0;
+      if (!count) return;
+      const seg = document.createElement('div');
+      seg.className = 'bar-seg';
+      seg.style.background = s.color;
+      seg.style.flex = `${count} 0 auto`;
+      seg.tabIndex = 0;
+      seg.setAttribute('aria-label', `${r.owner}: ${count.toLocaleString()} ${s.label}`);
+      const rowInfo = [{label: s.label, count, color: s.color}];
+      const onShow = (ev) => showMultiTooltip(ev.clientX, ev.clientY, r.owner, rowInfo);
+      const onFocus = () => {
+        const rect = seg.getBoundingClientRect();
+        showMultiTooltip(rect.right, rect.top, r.owner, rowInfo);
+      };
+      seg.addEventListener('mouseenter', onShow);
+      seg.addEventListener('mousemove', onShow);
+      seg.addEventListener('mouseleave', hideChartTooltip);
+      seg.addEventListener('focus', onFocus);
+      seg.addEventListener('blur', hideChartTooltip);
+      wrap.appendChild(seg);
+    });
+
+    track.appendChild(wrap);
+    row.appendChild(track);
+
+    const totalEl = document.createElement('span');
+    totalEl.className = 'total';
+    totalEl.textContent = r.total.toLocaleString();
+    row.appendChild(totalEl);
+
+    container.appendChild(row);
+  });
 }
 
 // Fixed 8-hue categorical order (validated: node scripts/validate_palette.js
