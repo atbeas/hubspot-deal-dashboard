@@ -3136,6 +3136,14 @@ def sales_activity_summary():
         key=lambda x: x["total"], reverse=True,
     )
 
+    booked_by_owner = {}
+    for m in booked_meetings:
+        booked_by_owner[m["owner"]] = booked_by_owner.get(m["owner"], 0) + 1
+    booked_leaderboard = sorted(
+        [{"owner": o, "count": c} for o, c in booked_by_owner.items()],
+        key=lambda x: x["count"], reverse=True,
+    )
+
     return jsonify({
         "days": days,
         "total": len(activities),
@@ -3143,6 +3151,7 @@ def sales_activity_summary():
         "unique_contacts": len(contacts_touched),
         "leaderboard": leaderboard,
         "booked_meetings": len(booked_meetings),
+        "booked_leaderboard": booked_leaderboard,
     })
 
 

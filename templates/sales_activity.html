@@ -15,6 +15,9 @@
       --series-call: #3987e5;
       --series-email: #d95926;
       --series-meeting: #199e70;
+      /* Matches the "Booked Meetings" summary chip's green -- same metric,
+         same color, wherever it shows up. Contrast vs #1e2030 panel = 7.06:1. */
+      --series-booked: #22c55e;
     }
     body { font-family: 'Inter', sans-serif; background: #0f1117; color: #e8e9f0; min-height: 100vh; }
 
@@ -176,6 +179,11 @@
   </div>
 
   <div class="panel">
+    <h2>Booked Meetings by Rep</h2>
+    <div class="type-chart" id="bookedChart"></div>
+  </div>
+
+  <div class="panel">
     <div class="toolbar">
       <input type="text" id="searchBox" placeholder="Search company, contact, or subject..." />
       <select id="typeFilter">
@@ -268,6 +276,7 @@ async function loadSummary() {
 
   renderTypeLegend();
   renderTypeChart(data.leaderboard || []);
+  renderBookedChart(data.booked_leaderboard || []);
 }
 
 const TYPE_SERIES = [
@@ -346,6 +355,61 @@ function renderTypeChart(leaderboard) {
     const totalEl = document.createElement('span');
     totalEl.className = 'total';
     totalEl.textContent = r.total.toLocaleString();
+    row.appendChild(totalEl);
+
+    container.appendChild(row);
+  });
+}
+
+function renderBookedChart(leaderboard) {
+  const container = document.getElementById('bookedChart');
+  container.innerHTML = '';
+  if (!leaderboard.length) {
+    container.innerHTML = `<div class="empty-hint">No booked meetings in this window.</div>`;
+    return;
+  }
+  const maxCount = Math.max(1, ...leaderboard.map(r => r.count));
+
+  leaderboard.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'type-row';
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = r.owner;
+    row.appendChild(name);
+
+    const track = document.createElement('div');
+    track.className = 'bar-track';
+    const wrap = document.createElement('div');
+    wrap.className = 'bar-fill-wrap';
+    wrap.style.width = `${(r.count / maxCount * 100).toFixed(1)}%`;
+
+    const seg = document.createElement('div');
+    seg.className = 'bar-seg';
+    seg.style.background = 'var(--series-booked)';
+    seg.style.flex = '1 0 auto';
+    seg.tabIndex = 0;
+    seg.setAttribute('aria-label', `${r.owner}: ${r.count.toLocaleString()} booked meetings`);
+    const rowInfo = [{label: 'Booked Meetings', count: r.count, color: 'var(--series-booked)'}];
+    const onShow = (ev) => showMultiTooltip(ev.clientX, ev.clientY, r.owner, rowInfo);
+    const onFocus = () => {
+      const rect = seg.getBoundingClientRect();
+      showMultiTooltip(rect.right, rect.top, r.owner, rowInfo);
+    };
+    seg.addEventListener('mouseenter', onShow);
+    seg.addEventListener('mousemove', onShow);
+    seg.addEventListener('mouseleave', hideChartTooltip);
+    seg.addEventListener('focus', onFocus);
+    seg.addEventListener('blur', hideChartTooltip);
+    wrap.appendChild(seg);
+
+    track.appendChild(wrap);
+    row.appendChild(track);
+
+    const totalEl = document.createElement('span');
+    totalEl.className = 'total';
+    totalEl.textContent = r.count.toLocaleString();
     row.appendChild(totalEl);
 
     container.appendChild(row);
