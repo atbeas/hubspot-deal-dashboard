@@ -3067,14 +3067,12 @@ def get_booked_meetings(days=30, force=False):
     Any meeting source counts, per Andrew's call -- no filtering by
     hs_meeting_source (scheduling-link vs manually logged vs synced).
 
-    Credit for "who booked it" goes to every internal owner on
-    hs_all_owner_ids, not just hubspot_owner_id -- for SDR/AE meetings the
-    record's assigned owner is the AE running the call, while the SDR who
-    actually booked it (e.g. Roslyn) only shows up in hs_all_owner_ids.
-    Confirmed live: 0 of the RS-tagged meetings had hubspot_owner_id ==
-    Roslyn, but 11 had her in hs_all_owner_ids. A meeting can carry credit
-    for multiple reps, so by-rep/by-day sums may exceed the total meeting
-    count -- that's intentional shared credit, not double-counting the total."""
+    Credit for "who booked it" goes to the RS *contact's* assigned owner
+    (contact property hubspot_owner_id), not the meeting record's own
+    owner/attendee fields -- Andrew's call, after the hs_all_owner_ids
+    shared-credit approach (crediting every attendee) over-attributed
+    meetings to whoever else was on the invite. Contact ownership is the
+    single source of truth for "whose account is this."""
     now_ts = datetime.now(timezone.utc).timestamp()
     cached = _BOOKED_MEETINGS_CACHE.get(days)
     if not force and cached and (now_ts - cached["ts"] < BOOKED_MEETINGS_CACHE_TTL):
@@ -3086,7 +3084,7 @@ def get_booked_meetings(days=30, force=False):
 
     raw = fetch_engagements_in_range(
         "meetings", start_ms, end_ms,
-        ["hs_createdate", "hubspot_owner_id", "hs_all_owner_ids", "hs_meeting_title", "hs_meeting_outcome"],
+        ["hs_createdate", "hs_meeting_title", "hs_meeting_outcome"],
         date_field="hs_createdate",
     )
     assoc = get_engagement_contact_map("meetings", [r["id"] for r in raw])
@@ -3099,17 +3097,13 @@ def get_booked_meetings(days=30, force=False):
             continue
         props = r.get("properties") or {}
         contact = rs_contacts[rs_cid]
-
-        all_owner_ids = [oid.strip() for oid in (props.get("hs_all_owner_ids") or "").split(";") if oid.strip()]
-        credit_owners = sorted({owners[oid] for oid in all_owner_ids if oid in owners})
-        if not credit_owners:
-            credit_owners = [owners.get(props.get("hubspot_owner_id", ""), "") or "Unassigned"]
+        contact_owner = owners.get(contact.get("owner_id", ""), "") or "Unassigned"
 
         booked.append({
             "id": r["id"],
             "created_at": props.get("hs_createdate") or "",
-            "owner": owners.get(props.get("hubspot_owner_id", ""), "") or "Unassigned",
-            "credit_owners": credit_owners,
+            "owner": contact_owner,
+            "credit_owners": [contact_owner],
             "contact_id": rs_cid,
             "contact_name": contact["name"],
             "company": contact["company"],
