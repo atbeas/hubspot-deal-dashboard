@@ -3065,7 +3065,16 @@ def get_booked_meetings(days=30, force=False):
     distinct from get_sales_activity's meetings, which are filtered by
     hs_timestamp (the meeting's scheduled time), not when it was booked.
     Any meeting source counts, per Andrew's call -- no filtering by
-    hs_meeting_source (scheduling-link vs manually logged vs synced)."""
+    hs_meeting_source (scheduling-link vs manually logged vs synced).
+
+    Credit for "who booked it" goes to every internal owner on
+    hs_all_owner_ids, not just hubspot_owner_id -- for SDR/AE meetings the
+    record's assigned owner is the AE running the call, while the SDR who
+    actually booked it (e.g. Roslyn) only shows up in hs_all_owner_ids.
+    Confirmed live: 0 of the RS-tagged meetings had hubspot_owner_id ==
+    Roslyn, but 11 had her in hs_all_owner_ids. A meeting can carry credit
+    for multiple reps, so by-rep/by-day sums may exceed the total meeting
+    count -- that's intentional shared credit, not double-counting the total."""
     now_ts = datetime.now(timezone.utc).timestamp()
     cached = _BOOKED_MEETINGS_CACHE.get(days)
     if not force and cached and (now_ts - cached["ts"] < BOOKED_MEETINGS_CACHE_TTL):
@@ -3077,7 +3086,7 @@ def get_booked_meetings(days=30, force=False):
 
     raw = fetch_engagements_in_range(
         "meetings", start_ms, end_ms,
-        ["hs_createdate", "hubspot_owner_id", "hs_meeting_title", "hs_meeting_outcome"],
+        ["hs_createdate", "hubspot_owner_id", "hs_all_owner_ids", "hs_meeting_title", "hs_meeting_outcome"],
         date_field="hs_createdate",
     )
     assoc = get_engagement_contact_map("meetings", [r["id"] for r in raw])
@@ -3090,10 +3099,17 @@ def get_booked_meetings(days=30, force=False):
             continue
         props = r.get("properties") or {}
         contact = rs_contacts[rs_cid]
+
+        all_owner_ids = [oid.strip() for oid in (props.get("hs_all_owner_ids") or "").split(";") if oid.strip()]
+        credit_owners = sorted({owners[oid] for oid in all_owner_ids if oid in owners})
+        if not credit_owners:
+            credit_owners = [owners.get(props.get("hubspot_owner_id", ""), "") or "Unassigned"]
+
         booked.append({
             "id": r["id"],
             "created_at": props.get("hs_createdate") or "",
             "owner": owners.get(props.get("hubspot_owner_id", ""), "") or "Unassigned",
+            "credit_owners": credit_owners,
             "contact_id": rs_cid,
             "contact_name": contact["name"],
             "company": contact["company"],
@@ -3138,7 +3154,8 @@ def sales_activity_summary():
 
     booked_by_owner = {}
     for m in booked_meetings:
-        booked_by_owner[m["owner"]] = booked_by_owner.get(m["owner"], 0) + 1
+        for o in m["credit_owners"]:
+            booked_by_owner[o] = booked_by_owner.get(o, 0) + 1
     booked_leaderboard = sorted(
         [{"owner": o, "count": c} for o, c in booked_by_owner.items()],
         key=lambda x: x["count"], reverse=True,
@@ -3201,9 +3218,10 @@ def sales_activity_booked_timeline():
         if not m["created_at"]:
             continue
         date_str = m["created_at"][:10]
-        key = (m["owner"], date_str)
-        counts[key] = counts.get(key, 0) + 1
-        owner_totals[m["owner"]] = owner_totals.get(m["owner"], 0) + 1
+        for o in m["credit_owners"]:
+            key = (o, date_str)
+            counts[key] = counts.get(key, 0) + 1
+            owner_totals[o] = owner_totals.get(o, 0) + 1
 
     reps = sorted(owner_totals.keys(), key=lambda o: owner_totals[o], reverse=True)
     points = [{"owner": o, "date": d, "count": c} for (o, d), c in counts.items()]
