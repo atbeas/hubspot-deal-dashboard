@@ -24,7 +24,7 @@ TAB_DEFS = [
     ("hs_workflows",  "HS Workflows"),
     ("pull_contacts", "Pull Contacts"),
     ("msp_data",      "MSP Data"),
-    ("sales_activity", "Sales Activity"),
+    ("sales_activity", "RS Sales Activity"),
     ("admin",         "Admin"),
 ]
 TAB_KEYS = [key for key, _ in TAB_DEFS]

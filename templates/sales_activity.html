@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sales Activity — Deal Dashboard</title>
+  <title>RS Sales Activity — Deal Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -135,13 +135,13 @@
     <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>
   <div>
-    <h1>Sales Activity</h1>
+    <h1>RS Sales Activity</h1>
     <p>Calls, emails &amp; meetings logged in HubSpot on contacts tagged Sales Focus = Runway Selling</p>
   </div>
   <div class="header-nav">
     {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
     {% if current_user.is_owner or 'msp_data' in current_user.tabs %}<a href="/msp-data" class="nav-link">MSP Data</a>{% endif %}
-    <a href="/sales-activity" class="nav-link active">Sales Activity</a>
+    <a href="/sales-activity" class="nav-link active">RS Sales Activity</a>
     {% if current_user.is_owner or 'dashboard' in current_user.tabs %}<a href="/" class="nav-link">← Deal Alloc</a>{% endif %}
     <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
     {% if current_user.is_owner or 'hs_workflows' in current_user.tabs %}<a href="/hs-workflows" class="nav-link">HS Workflows</a>{% endif %}
