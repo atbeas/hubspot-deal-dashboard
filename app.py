@@ -2946,18 +2946,28 @@ def get_rs_contacts_cached(force=False):
     return contacts
 
 
-def fetch_engagements_in_range(obj_type, start_ms, end_ms, properties):
+def activity_date_window(days):
+    """(start_ms, end_ms) for the last `days` days, end exclusive via LT on
+    midnight-tomorrow so "today" is fully included without the LTE-on-a-
+    day-boundary trap that silently drops same-day records -- see the
+    HubSpot date-range LTE memory."""
+    end = (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = end - timedelta(days=days + 1)
+    return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
+
+
+def fetch_engagements_in_range(obj_type, start_ms, end_ms, properties, date_field="hs_timestamp"):
     results = []
     after = None
     while True:
         body = {
             "filterGroups": [{"filters": [
-                {"propertyName": "hs_timestamp", "operator": "GTE", "value": start_ms},
-                {"propertyName": "hs_timestamp", "operator": "LT", "value": end_ms},
+                {"propertyName": date_field, "operator": "GTE", "value": start_ms},
+                {"propertyName": date_field, "operator": "LT", "value": end_ms},
             ]}],
             "properties": properties,
             "limit": 200,
-            "sorts": [{"propertyName": "hs_timestamp", "direction": "DESCENDING"}],
+            "sorts": [{"propertyName": date_field, "direction": "DESCENDING"}],
         }
         if after:
             body["after"] = after
@@ -3001,14 +3011,7 @@ def get_sales_activity(days=30, force=False):
         return cached["data"]
 
     rs_contacts = get_rs_contacts_cached(force=force)
-
-    # End is midnight tomorrow (exclusive, via LT) so "today" is fully
-    # included without the LTE-on-a-day-boundary trap that silently drops
-    # same-day records -- see the HubSpot date-range LTE memory.
-    end = (datetime.now(timezone.utc) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    start = end - timedelta(days=days + 1)
-    start_ms = int(start.timestamp() * 1000)
-    end_ms = int(end.timestamp() * 1000)
+    start_ms, end_ms = activity_date_window(days)
 
     owners = {o["id"]: o["name"] for o in fetch_hubspot_owners()}
 
@@ -3053,6 +3056,57 @@ def get_sales_activity(days=30, force=False):
     return activities
 
 
+_BOOKED_MEETINGS_CACHE = {}
+BOOKED_MEETINGS_CACHE_TTL = 300  # seconds
+
+
+def get_booked_meetings(days=30, force=False):
+    """Meetings *created* (booked) in the window, on any RS contact --
+    distinct from get_sales_activity's meetings, which are filtered by
+    hs_timestamp (the meeting's scheduled time), not when it was booked.
+    Any meeting source counts, per Andrew's call -- no filtering by
+    hs_meeting_source (scheduling-link vs manually logged vs synced)."""
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _BOOKED_MEETINGS_CACHE.get(days)
+    if not force and cached and (now_ts - cached["ts"] < BOOKED_MEETINGS_CACHE_TTL):
+        return cached["data"]
+
+    rs_contacts = get_rs_contacts_cached(force=force)
+    start_ms, end_ms = activity_date_window(days)
+    owners = {o["id"]: o["name"] for o in fetch_hubspot_owners()}
+
+    raw = fetch_engagements_in_range(
+        "meetings", start_ms, end_ms,
+        ["hs_createdate", "hubspot_owner_id", "hs_meeting_title", "hs_meeting_outcome"],
+        date_field="hs_createdate",
+    )
+    assoc = get_engagement_contact_map("meetings", [r["id"] for r in raw])
+
+    booked = []
+    for r in raw:
+        cids = assoc.get(r["id"], [])
+        rs_cid = next((c for c in cids if c in rs_contacts), None)
+        if not rs_cid:
+            continue
+        props = r.get("properties") or {}
+        contact = rs_contacts[rs_cid]
+        booked.append({
+            "id": r["id"],
+            "created_at": props.get("hs_createdate") or "",
+            "owner": owners.get(props.get("hubspot_owner_id", ""), "") or "Unassigned",
+            "contact_id": rs_cid,
+            "contact_name": contact["name"],
+            "company": contact["company"],
+            "title": props.get("hs_meeting_title") or "",
+            "outcome": MEETING_OUTCOME_LABELS.get(props.get("hs_meeting_outcome"), props.get("hs_meeting_outcome") or ""),
+            "hubspot_url": f"https://app.hubspot.com/contacts/23416553/record/0-1/{rs_cid}",
+        })
+
+    booked.sort(key=lambda m: m["created_at"], reverse=True)
+    _BOOKED_MEETINGS_CACHE[days] = {"data": booked, "ts": now_ts}
+    return booked
+
+
 @app.route("/sales-activity")
 @tab_required('sales_activity')
 def sales_activity_page():
@@ -3063,7 +3117,9 @@ def sales_activity_page():
 @tab_required('sales_activity')
 def sales_activity_summary():
     days = max(1, min(180, int(request.args.get("days", 30) or 30)))
-    activities = get_sales_activity(days=days, force=request.args.get("refresh") == "1")
+    force = request.args.get("refresh") == "1"
+    activities = get_sales_activity(days=days, force=force)
+    booked_meetings = get_booked_meetings(days=days, force=force)
 
     by_type = {"calls": 0, "emails": 0, "meetings": 0}
     by_owner = {}
@@ -3086,6 +3142,7 @@ def sales_activity_summary():
         "by_type": by_type,
         "unique_contacts": len(contacts_touched),
         "leaderboard": leaderboard,
+        "booked_meetings": len(booked_meetings),
     })
 
 

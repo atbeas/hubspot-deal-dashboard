@@ -241,11 +241,12 @@ async function loadSummary() {
     {label: 'Total Activities', num: data.total || 0, cls: 'good'},
     {label: 'Calls', num: t.calls || 0, cls: ''},
     {label: 'Emails', num: t.emails || 0, cls: ''},
-    {label: 'Meetings', num: t.meetings || 0, cls: ''},
+    {label: 'Meetings', num: t.meetings || 0, cls: '', title: 'Meetings that occurred (or are scheduled to occur) in this window, by meeting time.'},
+    {label: 'Booked Meetings', num: data.booked_meetings || 0, cls: 'good', title: 'Meetings created (booked) in this window, regardless of when they’re scheduled to happen.'},
     {label: 'Unique Contacts Reached', num: data.unique_contacts || 0, cls: ''},
   ];
   document.getElementById('summaryStrip').innerHTML = chips.map(c => `
-    <div class="summary-chip ${c.cls}">
+    <div class="summary-chip ${c.cls}" ${c.title ? `title="${c.title}"` : ''}>
       <span class="num">${c.num.toLocaleString()}</span>${c.label}
     </div>
   `).join('');
