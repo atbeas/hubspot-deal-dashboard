@@ -3186,6 +3186,37 @@ def sales_activity_timeline():
     })
 
 
+@app.route("/api/sales-activity/booked-timeline")
+@tab_required('sales_activity')
+def sales_activity_booked_timeline():
+    days = max(1, min(180, int(request.args.get("days", 30) or 30)))
+    booked_meetings = get_booked_meetings(days=days, force=request.args.get("refresh") == "1")
+
+    end_date = datetime.now(timezone.utc).date()
+    start_date = end_date - timedelta(days=days - 1)
+
+    counts = {}
+    owner_totals = {}
+    for m in booked_meetings:
+        if not m["created_at"]:
+            continue
+        date_str = m["created_at"][:10]
+        key = (m["owner"], date_str)
+        counts[key] = counts.get(key, 0) + 1
+        owner_totals[m["owner"]] = owner_totals.get(m["owner"], 0) + 1
+
+    reps = sorted(owner_totals.keys(), key=lambda o: owner_totals[o], reverse=True)
+    points = [{"owner": o, "date": d, "count": c} for (o, d), c in counts.items()]
+
+    return jsonify({
+        "days": days,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "reps": reps,
+        "points": points,
+    })
+
+
 @app.route("/api/sales-activity/feed")
 @tab_required('sales_activity')
 def sales_activity_feed():
