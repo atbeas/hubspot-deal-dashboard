@@ -7,6 +7,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      /* Categorical triad (validated: node scripts/validate_palette.js
+         "#3987e5,#d95926,#199e70" --mode dark --surface "#1e2030" --pairs all
+         -> ALL CHECKS PASS). Fixed order, one hue per activity type, reused
+         everywhere that type appears (chart, legend, table pills). */
+      --series-call: #3987e5;
+      --series-email: #d95926;
+      --series-meeting: #199e70;
+    }
     body { font-family: 'Inter', sans-serif; background: #0f1117; color: #e8e9f0; min-height: 100vh; }
 
     header {
@@ -51,12 +60,40 @@
     .btn-ghost { background: rgba(255,255,255,.06); color: #c9cad8; border: 1px solid #2a2d3e; }
     .btn-ghost:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
 
-    .leaderboard { display: flex; flex-direction: column; gap: 8px; }
+    .legend { display: flex; gap: 18px; margin-bottom: 14px; font-size: .78rem; color: #8b8fa8; }
+    .legend-item { display: flex; align-items: center; gap: 7px; }
+    .legend-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
+
+    .leaderboard { display: flex; flex-direction: column; gap: 10px; }
     .lb-row { display: flex; align-items: center; gap: 10px; font-size: .84rem; }
     .lb-row .name { width: 180px; color: #c9cad8; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .lb-row .bar-track { flex: 1; background: #14151f; border-radius: 4px; height: 8px; overflow: hidden; }
-    .lb-row .bar-fill { height: 100%; background: #ff5c35; border-radius: 4px; }
+    .lb-row .bar-track { flex: 1; background: #14151f; height: 14px; overflow: hidden; }
+    .lb-row .bar-fill-wrap {
+      height: 100%; display: flex; overflow: hidden;
+      border-top-right-radius: 4px; border-bottom-right-radius: 4px;
+    }
+    .lb-row .bar-seg {
+      height: 100%; cursor: pointer; transition: filter .1s;
+    }
+    .lb-row .bar-seg:not(:last-child) { margin-right: 2px; }
+    .lb-row .bar-seg:hover, .lb-row .bar-seg:focus-visible {
+      filter: brightness(1.2); outline: none;
+    }
     .lb-row .count { width: 40px; text-align: right; color: #e8e9f0; font-weight: 600; }
+
+    .chart-tooltip {
+      position: fixed; pointer-events: none; z-index: 1000;
+      background: #14151f; border: 1px solid #2a2d3e; border-radius: 6px;
+      padding: 7px 11px; font-size: .78rem; color: #c9cad8;
+      box-shadow: 0 4px 16px rgba(0,0,0,.4);
+      opacity: 0; transition: opacity .1s; max-width: 240px;
+    }
+    .chart-tooltip.visible { opacity: 1; }
+    .chart-tooltip .tt-row { display: flex; align-items: center; gap: 6px; }
+    .chart-tooltip .tt-key { width: 10px; height: 2px; border-radius: 1px; display: inline-block; flex-shrink: 0; }
+    .chart-tooltip .tt-value { color: #e8e9f0; font-weight: 700; font-size: .86rem; }
+    .chart-tooltip .tt-label { color: #8b8fa8; }
+    .chart-tooltip .tt-name { color: #e8e9f0; font-weight: 600; margin-bottom: 3px; }
 
     table { width: 100%; border-collapse: collapse; font-size: .82rem; }
     th { text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .4px; color: #8b8fa8; padding: 9px 10px; border-bottom: 1px solid #2a2d3e; white-space: nowrap; position: sticky; top: 0; background: #1e2030; }
@@ -67,9 +104,9 @@
     .sub { display: block; font-size: .72rem; color: #5c607a; }
 
     .pill { display: inline-block; font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; letter-spacing: .2px; white-space: nowrap; }
-    .pill-call { background: rgba(96,165,250,.15); color: #60a5fa; }
-    .pill-email { background: rgba(251,191,36,.15); color: #fbbf24; }
-    .pill-meeting { background: rgba(34,197,94,.15); color: #4ade80; }
+    .pill-call { background: rgba(57,135,229,.15); color: var(--series-call); }
+    .pill-email { background: rgba(217,89,38,.15); color: var(--series-email); }
+    .pill-meeting { background: rgba(25,158,112,.15); color: var(--series-meeting); }
     .hs-link { color: #60a5fa; text-decoration: none; font-size: .74rem; }
     .hs-link:hover { text-decoration: underline; }
 
@@ -118,6 +155,7 @@
 
   <div class="panel">
     <h2>By Rep</h2>
+    <div class="legend" id="chartLegend"></div>
     <div class="leaderboard" id="leaderboard"></div>
   </div>
 
@@ -196,21 +234,142 @@ async function loadSummary() {
     </div>
   `).join('');
 
-  const lb = data.leaderboard || [];
-  const maxCount = Math.max(1, ...lb.map(r => r.count));
-  document.getElementById('leaderboard').innerHTML = lb.length ? lb.map(r => `
-    <div class="lb-row">
-      <span class="name">${r.owner}</span>
-      <div class="bar-track"><div class="bar-fill" style="width:${(r.count / maxCount * 100).toFixed(0)}%"></div></div>
-      <span class="count">${r.count}</span>
-    </div>
-  `).join('') : `<div class="empty-hint">No activity in this window.</div>`;
+  renderLeaderboard(data.leaderboard || []);
 
   const ownerSelect = document.getElementById('ownerFilter');
   const prevVal = ownerSelect.value;
-  ownerSelect.innerHTML = '<option value="all">All reps</option>' +
-    lb.map(r => `<option value="${r.owner}">${r.owner}</option>`).join('');
+  ownerSelect.innerHTML = '';
+  const allOpt = document.createElement('option');
+  allOpt.value = 'all';
+  allOpt.textContent = 'All reps';
+  ownerSelect.appendChild(allOpt);
+  (data.leaderboard || []).forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.owner;
+    opt.textContent = r.owner;
+    ownerSelect.appendChild(opt);
+  });
   ownerSelect.value = prevVal;
+}
+
+const SERIES = [
+  {key: 'calls', label: 'Calls', color: 'var(--series-call)'},
+  {key: 'emails', label: 'Emails', color: 'var(--series-email)'},
+  {key: 'meetings', label: 'Meetings', color: 'var(--series-meeting)'},
+];
+
+function renderLegend() {
+  const el = document.getElementById('chartLegend');
+  el.innerHTML = '';
+  SERIES.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    const swatch = document.createElement('span');
+    swatch.className = 'legend-swatch';
+    swatch.style.background = s.color;
+    const text = document.createElement('span');
+    text.textContent = s.label;
+    item.appendChild(swatch);
+    item.appendChild(text);
+    el.appendChild(item);
+  });
+}
+
+const chartTooltip = document.createElement('div');
+chartTooltip.className = 'chart-tooltip';
+document.body.appendChild(chartTooltip);
+
+function showChartTooltip(x, y, ownerName, seg) {
+  chartTooltip.innerHTML = '';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'tt-name';
+  nameEl.textContent = ownerName;
+  const row = document.createElement('div');
+  row.className = 'tt-row';
+  const key = document.createElement('span');
+  key.className = 'tt-key';
+  key.style.background = seg.color;
+  const value = document.createElement('span');
+  value.className = 'tt-value';
+  value.textContent = seg.count.toLocaleString();
+  const label = document.createElement('span');
+  label.className = 'tt-label';
+  label.textContent = seg.label;
+  row.appendChild(key);
+  row.appendChild(value);
+  row.appendChild(label);
+  chartTooltip.appendChild(nameEl);
+  chartTooltip.appendChild(row);
+
+  const vw = window.innerWidth;
+  let left = x + 14;
+  if (left + 220 > vw) left = x - 220;
+  chartTooltip.style.left = `${Math.max(4, left)}px`;
+  chartTooltip.style.top = `${y + 14}px`;
+  chartTooltip.classList.add('visible');
+}
+
+function hideChartTooltip() {
+  chartTooltip.classList.remove('visible');
+}
+
+function renderLeaderboard(lb) {
+  const container = document.getElementById('leaderboard');
+  container.innerHTML = '';
+  if (!lb.length) {
+    container.innerHTML = `<div class="empty-hint">No activity in this window.</div>`;
+    return;
+  }
+  const maxTotal = Math.max(1, ...lb.map(r => r.total));
+
+  lb.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'lb-row';
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = r.owner;
+    row.appendChild(name);
+
+    const track = document.createElement('div');
+    track.className = 'bar-track';
+    const wrap = document.createElement('div');
+    wrap.className = 'bar-fill-wrap';
+    wrap.style.width = `${(r.total / maxTotal * 100).toFixed(1)}%`;
+
+    SERIES.forEach(s => {
+      const count = r[s.key] || 0;
+      if (!count) return;
+      const seg = document.createElement('div');
+      seg.className = 'bar-seg';
+      seg.style.background = s.color;
+      seg.style.flex = `${count} 0 auto`;
+      seg.tabIndex = 0;
+      seg.setAttribute('aria-label', `${r.owner}: ${count.toLocaleString()} ${s.label}`);
+      const segInfo = {label: s.label, count, color: s.color};
+      const onShow = (ev) => showChartTooltip(ev.clientX, ev.clientY, r.owner, segInfo);
+      const onFocus = () => {
+        const rect = seg.getBoundingClientRect();
+        showChartTooltip(rect.right, rect.top, r.owner, segInfo);
+      };
+      seg.addEventListener('mouseenter', onShow);
+      seg.addEventListener('mousemove', onShow);
+      seg.addEventListener('mouseleave', hideChartTooltip);
+      seg.addEventListener('focus', onFocus);
+      seg.addEventListener('blur', hideChartTooltip);
+      wrap.appendChild(seg);
+    });
+
+    track.appendChild(wrap);
+    row.appendChild(track);
+
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = r.total.toLocaleString();
+    row.appendChild(count);
+
+    container.appendChild(row);
+  });
 }
 
 async function loadTable() {
@@ -287,6 +446,7 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
 document.getElementById('prevPage').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadTable(); } });
 document.getElementById('nextPage').addEventListener('click', () => { currentPage++; loadTable(); });
 
+renderLegend();
 loadSummary();
 loadTable();
 </script>

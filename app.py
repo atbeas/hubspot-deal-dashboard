@@ -3070,12 +3070,14 @@ def sales_activity_summary():
     contacts_touched = set()
     for a in activities:
         by_type[a["type"]] = by_type.get(a["type"], 0) + 1
-        by_owner[a["owner"]] = by_owner.get(a["owner"], 0) + 1
+        row = by_owner.setdefault(a["owner"], {"calls": 0, "emails": 0, "meetings": 0})
+        row[a["type"]] += 1
         contacts_touched.add(a["contact_id"])
 
     leaderboard = sorted(
-        [{"owner": o, "count": c} for o, c in by_owner.items()],
-        key=lambda x: x["count"], reverse=True,
+        [{"owner": o, "calls": c["calls"], "emails": c["emails"], "meetings": c["meetings"],
+          "total": c["calls"] + c["emails"] + c["meetings"]} for o, c in by_owner.items()],
+        key=lambda x: x["total"], reverse=True,
     )
 
     return jsonify({
