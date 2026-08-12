@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cloud Tango — Deal Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #0f1117; color: #e8e9f0; min-height: 100vh; }
+
+    header {
+      background: #0d0e1a; color: #e8e9f0;
+      padding: 16px 32px; display: flex; align-items: center; gap: 14px;
+      border-bottom: 1px solid #2a2d3e; box-shadow: 0 2px 12px rgba(0,0,0,.4);
+    }
+    header h1 { font-size: 1.15rem; font-weight: 700; }
+    header p { font-size: .82rem; color: #8b8fa8; margin-top: 2px; }
+    .header-nav { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+    .nav-link {
+      padding: 7px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600;
+      text-decoration: none; color: #c9cad8; background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1); transition: background .15s;
+    }
+    .nav-link:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
+    .nav-link.active { background: #ff5c35; color: #fff; border-color: #ff5c35; }
+
+    .main { padding: 28px 36px 60px; }
+
+    .summary-strip { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+    .summary-chip {
+      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 10px;
+      padding: 12px 18px; font-size: .8rem; color: #8b8fa8; min-width: 130px; cursor: pointer;
+    }
+    .summary-chip.active { border-color: #ff5c35; }
+    .summary-chip .num { display: block; font-size: 1.4rem; font-weight: 700; color: #e8e9f0; margin-bottom: 2px; }
+    .summary-chip.good .num { color: #22c55e; }
+    .summary-chip.bad .num { color: #f87171; }
+    .summary-chip.warn .num { color: #fbbf24; }
+
+    .panel {
+      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 12px;
+      padding: 18px 20px; margin-bottom: 18px;
+    }
+    .panel h2 { font-size: .95rem; font-weight: 700; color: #e8e9f0; margin-bottom: 14px; }
+
+    .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .toolbar input[type="text"], .toolbar select {
+      border: 1px solid #2a2d3e; border-radius: 6px; padding: 8px 12px;
+      font-size: .86rem; font-family: inherit; color: #e8e9f0; background: #14151f; outline: none;
+    }
+    .toolbar input[type="text"] { flex: 1; min-width: 220px; }
+    .toolbar input:focus, .toolbar select:focus { border-color: #ff5c35; }
+    .btn { padding: 8px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600; cursor: pointer; border: none; transition: background .15s; }
+    .btn-primary { background: #ff5c35; color: #fff; }
+    .btn-primary:hover { background: #e04d2a; }
+    .btn-ghost { background: rgba(255,255,255,.06); color: #c9cad8; border: 1px solid #2a2d3e; }
+    .btn-ghost:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
+
+    .leaderboard-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+    .leaderboard-table th { text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .4px; color: #8b8fa8; padding: 8px 10px; border-bottom: 1px solid #2a2d3e; }
+    .leaderboard-table td { padding: 8px 10px; border-bottom: 1px solid #22243a; color: #c9cad8; }
+    .leaderboard-table tr:last-child td { border-bottom: none; }
+    .leaderboard-table .owner-cell { font-weight: 600; color: #e8e9f0; }
+    .bar-wrap { display: flex; align-items: center; gap: 8px; }
+    .bar-track { flex: 1; height: 8px; border-radius: 4px; background: #14151f; overflow: hidden; min-width: 80px; }
+    .bar-fill { height: 100%; background: #ff5c35; border-radius: 4px; }
+
+    table.data-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    .data-table th { text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .4px; color: #8b8fa8; padding: 9px 10px; border-bottom: 1px solid #2a2d3e; white-space: nowrap; position: sticky; top: 0; background: #1e2030; }
+    .data-table td { padding: 8px 10px; border-bottom: 1px solid #22243a; color: #c9cad8; vertical-align: middle; }
+    .data-table tr:hover td { background: rgba(255,255,255,.02); }
+    .table-wrap { max-height: 58vh; overflow-y: auto; overflow-x: auto; border: 1px solid #2a2d3e; border-radius: 8px; }
+    .company-cell { font-weight: 600; color: #e8e9f0; }
+    .sub { display: block; font-size: .72rem; color: #5c607a; }
+
+    .pill { display: inline-block; font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; letter-spacing: .2px; white-space: nowrap; }
+    .pill-good { background: rgba(34,197,94,.15); color: #4ade80; }
+    .pill-warn { background: rgba(251,191,36,.15); color: #fbbf24; }
+    .pill-bad  { background: rgba(248,113,113,.15); color: #f87171; }
+    .pill-pending { background: rgba(139,143,168,.15); color: #8b8fa8; }
+    .hs-link { color: #60a5fa; text-decoration: none; font-size: .74rem; }
+    .hs-link:hover { text-decoration: underline; }
+
+    .pagination { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: .84rem; color: #8b8fa8; }
+    .empty-hint { color: #5c607a; font-size: .85rem; padding: 30px 0; text-align: center; }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="rgba(255,255,255,.2)"/>
+    <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>Cloud Tango</h1>
+    <p>Outreach progress for every contact tagged lead_source = CloudTango</p>
+  </div>
+  <div class="header-nav">
+    {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
+    {% if current_user.is_owner or 'msp_data' in current_user.tabs %}<a href="/msp-data" class="nav-link">MSP Data</a>{% endif %}
+    {% if current_user.is_owner or 'sales_activity' in current_user.tabs %}<a href="/sales-activity" class="nav-link">RS Sales Activity</a>{% endif %}
+    <a href="/cloud-tango" class="nav-link active">Cloud Tango</a>
+    {% if current_user.is_owner or 'dashboard' in current_user.tabs %}<a href="/" class="nav-link">← Deal Alloc</a>{% endif %}
+    <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
+    {% if current_user.is_owner or 'hs_workflows' in current_user.tabs %}<a href="/hs-workflows" class="nav-link">HS Workflows</a>{% endif %}
+    {% if current_user.is_owner or 'admin' in current_user.tabs %}<a href="/admin" class="nav-link">Admin</a>{% endif %}
+    <a href="/logout" class="nav-link">Log Out</a>
+  </div>
+</header>
+
+<div class="main">
+  <div class="summary-strip" id="summaryStrip"></div>
+
+  <div class="panel">
+    <h2>By Owner</h2>
+    <table class="leaderboard-table" id="leaderboardTable">
+      <thead>
+        <tr><th>Owner</th><th>Total</th><th>Contacted</th><th>Never Contacted</th><th>Tasks Completed</th><th>Tasks Open</th></tr>
+      </thead>
+      <tbody id="leaderboardBody"></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <input type="text" id="searchBox" placeholder="Search company, email, or name..." />
+      <select id="statusFilter">
+        <option value="all">All contacts</option>
+        <option value="never">Never contacted</option>
+        <option value="call">Contacted — call</option>
+        <option value="email">Contacted — email</option>
+        <option value="open_task">Has open task</option>
+        <option value="no_open_task">No open task</option>
+      </select>
+      <select id="ownerFilter">
+        <option value="all">All owners</option>
+      </select>
+      <button class="btn btn-ghost" id="refreshBtn" type="button">↻ Refresh from HubSpot</button>
+      <span id="loadingHint" style="font-size:.8rem;color:#5c607a;"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Company / Contact</th>
+            <th>Owner</th>
+            <th>Calls</th>
+            <th>Last Call</th>
+            <th>Emails</th>
+            <th>Last Email</th>
+            <th>Tasks</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <button class="btn btn-ghost" id="prevPage" type="button">← Prev</button>
+      <span id="pageInfo"></span>
+      <button class="btn btn-ghost" id="nextPage" type="button">Next →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentPage = 1;
+const perPage = 50;
+let currentStatus = 'all';
+let currentOwner = 'all';
+let currentQuery = '';
+let searchDebounce = null;
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString(undefined, {year: 'numeric', month: 'short', day: 'numeric'});
+}
+
+async function loadSummary() {
+  const resp = await fetch('/api/cloud-tango/summary');
+  const data = await resp.json();
+  const chips = [
+    {key: 'all', label: 'Total CloudTango Contacts', num: data.total, cls: ''},
+    {key: 'call', label: 'Contacted — Call', num: data.contacted_call || 0, cls: 'good'},
+    {key: 'email', label: 'Contacted — Email', num: data.contacted_email || 0, cls: 'good'},
+    {key: null, label: 'Contacted — Any Channel', num: data.contacted_either || 0, cls: 'good'},
+    {key: 'never', label: 'Never Contacted', num: data.never_contacted || 0, cls: 'bad'},
+    {key: null, label: 'Tasks Completed', num: data.tasks_completed || 0, cls: 'good'},
+    {key: 'open_task', label: 'Tasks Open', num: data.tasks_open || 0, cls: 'warn'},
+  ];
+  document.getElementById('summaryStrip').innerHTML = chips.map(c => `
+    <div class="summary-chip ${c.cls} ${c.key === currentStatus ? 'active' : ''}" ${c.key ? `data-status="${c.key}"` : ''}>
+      <span class="num">${c.num.toLocaleString()}</span>${c.label}
+    </div>
+  `).join('');
+  document.querySelectorAll('.summary-chip[data-status]').forEach(el => {
+    el.addEventListener('click', () => {
+      currentStatus = el.dataset.status;
+      document.getElementById('statusFilter').value = currentStatus;
+      currentPage = 1;
+      loadTable();
+      loadSummary();
+    });
+  });
+
+  const leaderboard = data.leaderboard || [];
+  const ownerSelect = document.getElementById('ownerFilter');
+  const prevValue = ownerSelect.value;
+  ownerSelect.innerHTML = '<option value="all">All owners</option>' +
+    leaderboard.map(l => `<option value="${l.owner}">${l.owner}</option>`).join('');
+  ownerSelect.value = prevValue || 'all';
+
+  const maxTotal = Math.max(1, ...leaderboard.map(l => l.total));
+  document.getElementById('leaderboardBody').innerHTML = leaderboard.map(l => `
+    <tr>
+      <td class="owner-cell">${l.owner}</td>
+      <td>${l.total.toLocaleString()}</td>
+      <td>
+        <div class="bar-wrap">
+          <div class="bar-track"><div class="bar-fill" style="width:${(l.contacted / Math.max(1, l.total) * 100).toFixed(0)}%"></div></div>
+          <span>${l.contacted.toLocaleString()}</span>
+        </div>
+      </td>
+      <td>${l.never.toLocaleString()}</td>
+      <td>${l.tasks_completed.toLocaleString()}</td>
+      <td>${l.tasks_open.toLocaleString()}</td>
+    </tr>
+  `).join('') || `<tr><td colspan="6"><div class="empty-hint">No data yet.</div></td></tr>`;
+}
+
+async function loadTable() {
+  document.getElementById('loadingHint').textContent = 'Loading…';
+  const params = new URLSearchParams({page: currentPage, per_page: perPage, status: currentStatus, owner: currentOwner, q: currentQuery});
+  const resp = await fetch(`/api/cloud-tango/contacts?${params}`);
+  const data = await resp.json();
+  document.getElementById('loadingHint').textContent = '';
+
+  const tbody = document.getElementById('tableBody');
+  if (!data.rows.length) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-hint">No contacts match this filter.</div></td></tr>`;
+  } else {
+    tbody.innerHTML = data.rows.map(r => `
+      <tr>
+        <td>
+          <span class="company-cell">${r.company || '(no company)'}</span>
+          <span class="sub">${r.name || ''} ${r.email ? '· ' + r.email : ''}</span>
+          <a class="hs-link" href="${r.hubspot_url}" target="_blank" rel="noopener">View in HubSpot →</a>
+        </td>
+        <td>${r.owner || '<span class="sub">—</span>'}</td>
+        <td>${r.calls ? `<span class="pill pill-good">${r.calls}</span>` : '<span class="pill pill-pending">0</span>'}</td>
+        <td>${r.last_call_at ? fmtDate(r.last_call_at) : '<span class="sub">Never</span>'}</td>
+        <td>${r.emails ? `<span class="pill pill-good">${r.emails}</span>` : '<span class="pill pill-pending">0</span>'}</td>
+        <td>${r.last_email_at ? fmtDate(r.last_email_at) : '<span class="sub">Never</span>'}</td>
+        <td>
+          ${r.tasks_open > 0 ? `<span class="pill pill-warn">${r.tasks_open} open</span>` : ''}
+          ${r.tasks_completed > 0 ? `<span class="pill pill-good">${r.tasks_completed} done</span>` : ''}
+          ${!r.tasks_total ? '<span class="sub">—</span>' : ''}
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  const totalPages = Math.max(1, Math.ceil(data.total / perPage));
+  document.getElementById('pageInfo').textContent = `Page ${data.page} of ${totalPages} (${data.total.toLocaleString()} contacts)`;
+  document.getElementById('prevPage').disabled = currentPage <= 1;
+  document.getElementById('nextPage').disabled = currentPage >= totalPages;
+}
+
+document.getElementById('statusFilter').addEventListener('change', (e) => {
+  currentStatus = e.target.value;
+  currentPage = 1;
+  loadTable();
+  loadSummary();
+});
+
+document.getElementById('ownerFilter').addEventListener('change', (e) => {
+  currentOwner = e.target.value;
+  currentPage = 1;
+  loadTable();
+});
+
+document.getElementById('searchBox').addEventListener('input', (e) => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => {
+    currentQuery = e.target.value;
+    currentPage = 1;
+    loadTable();
+  }, 350);
+});
+
+document.getElementById('refreshBtn').addEventListener('click', async () => {
+  document.getElementById('loadingHint').textContent = 'Refreshing from HubSpot… this can take a minute for ~3,000 contacts.';
+  await fetch('/api/cloud-tango/summary?refresh=1');
+  await loadTable();
+  await loadSummary();
+});
+
+document.getElementById('prevPage').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadTable(); } });
+document.getElementById('nextPage').addEventListener('click', () => { currentPage++; loadTable(); });
+
+loadSummary();
+loadTable();
+</script>
+
+</body>
+</html>

@@ -25,6 +25,7 @@ TAB_DEFS = [
     ("pull_contacts", "Pull Contacts"),
     ("msp_data",      "MSP Data"),
     ("sales_activity", "RS Sales Activity"),
+    ("cloud_tango",   "Cloud Tango"),
     ("admin",         "Admin"),
 ]
 TAB_KEYS = [key for key, _ in TAB_DEFS]
@@ -490,7 +491,7 @@ def first_accessible_url(user):
         if user_has_tab(user, key):
             return url_for({"dashboard": "index", "hs_workflows": "hs_workflows_page",
                             "pull_contacts": "pull_contacts_page", "msp_data": "msp_data_page",
-                            "sales_activity": "sales_activity_page",
+                            "sales_activity": "sales_activity_page", "cloud_tango": "cloud_tango_page",
                             "admin": "admin"}[key])
     return url_for("no_access")
 
@@ -3253,6 +3254,269 @@ def sales_activity_feed():
                 continue
         filtered.append(a)
 
+    total = len(filtered)
+    start = (page - 1) * per_page
+    rows = filtered[start:start + per_page]
+
+    return jsonify({"total": total, "page": page, "per_page": per_page, "rows": rows})
+
+
+# ============================================================================
+# Cloud Tango — outreach progress for the lead_source=CloudTango contact pool
+# ============================================================================
+
+CLOUDTANGO_CONTACT_PROPS = ["firstname", "lastname", "email", "company", "hubspot_owner_id", "createdate"]
+_CLOUDTANGO_CONTACTS_CACHE = {"data": None, "ts": 0}
+CLOUDTANGO_CONTACTS_CACHE_TTL = 600  # seconds
+
+
+def fetch_cloudtango_contacts_live():
+    """id -> display info, for every contact tagged lead_source = CloudTango."""
+    contacts = {}
+    after = None
+    while True:
+        body = {
+            "filterGroups": [{"filters": [{"propertyName": "lead_source", "operator": "EQ", "value": "CloudTango"}]}],
+            "properties": CLOUDTANGO_CONTACT_PROPS,
+            "limit": 200,
+        }
+        if after:
+            body["after"] = after
+        resp = requests.post(f"{BASE_URL}/crm/v3/objects/contacts/search", headers=HEADERS, json=body, timeout=30)
+        if not resp.ok:
+            break
+        data = resp.json()
+        for r in data.get("results", []):
+            props = r.get("properties") or {}
+            contacts[r["id"]] = {
+                "name": f"{props.get('firstname','')} {props.get('lastname','')}".strip(),
+                "email": props.get("email", ""),
+                "company": props.get("company", ""),
+                "owner_id": props.get("hubspot_owner_id", ""),
+                "created_at": props.get("createdate", ""),
+            }
+        after = data.get("paging", {}).get("next", {}).get("after")
+        if not after:
+            break
+    return contacts
+
+
+def get_cloudtango_contacts_cached(force=False):
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _CLOUDTANGO_CONTACTS_CACHE["data"]
+    if not force and cached and (now_ts - _CLOUDTANGO_CONTACTS_CACHE["ts"] < CLOUDTANGO_CONTACTS_CACHE_TTL):
+        return cached
+    contacts = fetch_cloudtango_contacts_live()
+    _CLOUDTANGO_CONTACTS_CACHE["data"] = contacts
+    _CLOUDTANGO_CONTACTS_CACHE["ts"] = now_ts
+    return contacts
+
+
+def _fetch_contact_engagement_assoc(obj_type, contact_ids):
+    """contact id -> [engagement id, ...] via v4 associations, one engagement type at a time."""
+    mapping = {}
+    chunks = list(_chunks(contact_ids, 100))
+
+    def fetch_chunk(chunk):
+        resp = requests.post(
+            f"{BASE_URL}/crm/v4/associations/contacts/{obj_type}/batch/read",
+            headers=HEADERS, json={"inputs": [{"id": cid} for cid in chunk]}, timeout=30,
+        )
+        return resp.json().get("results", []) if resp.ok else []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        for results in ex.map(fetch_chunk, chunks):
+            for r in results:
+                cid = str(r.get("from", {}).get("id", ""))
+                mapping[cid] = [str(t["toObjectId"]) for t in r.get("to", [])]
+    return mapping
+
+
+def _fetch_engagement_props(obj_type, engagement_ids, properties):
+    """engagement id -> properties dict, batch/read across chunks."""
+    props_by_id = {}
+    chunks = list(_chunks(engagement_ids, 100))
+
+    def fetch_chunk(chunk):
+        resp = requests.post(
+            f"{BASE_URL}/crm/v3/objects/{obj_type}/batch/read", headers=HEADERS,
+            json={"properties": properties, "inputs": [{"id": t} for t in chunk]}, timeout=30,
+        )
+        return resp.json().get("results", []) if resp.ok else []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        for results in ex.map(fetch_chunk, chunks):
+            for item in results:
+                props_by_id[item["id"]] = item.get("properties") or {}
+    return props_by_id
+
+
+_CLOUDTANGO_OUTREACH_CACHE = {"data": None, "ts": 0}
+CLOUDTANGO_OUTREACH_CACHE_TTL = 600  # seconds -- association+property fan-out across
+                                     # ~3k contacts x 3 engagement types is too expensive
+                                     # to redo on every page load
+
+
+def fetch_cloudtango_outreach_live(contact_ids):
+    """contact id -> {calls, last_call_at, emails, last_email_at,
+    tasks_total, tasks_completed, tasks_open}."""
+    result = {cid: {
+        "calls": 0, "last_call_at": "", "emails": 0, "last_email_at": "",
+        "tasks_total": 0, "tasks_completed": 0, "tasks_open": 0,
+    } for cid in contact_ids}
+
+    task_assoc = _fetch_contact_engagement_assoc("tasks", contact_ids)
+    task_props = _fetch_engagement_props("tasks", sorted({t for tids in task_assoc.values() for t in tids}), ["hs_task_status"])
+    for cid, tids in task_assoc.items():
+        if cid not in result:
+            continue
+        completed = sum(1 for t in tids if task_props.get(t, {}).get("hs_task_status") == "COMPLETED")
+        result[cid]["tasks_total"] = len(tids)
+        result[cid]["tasks_completed"] = completed
+        result[cid]["tasks_open"] = len(tids) - completed
+
+    call_assoc = _fetch_contact_engagement_assoc("calls", contact_ids)
+    call_props = _fetch_engagement_props("calls", sorted({t for tids in call_assoc.values() for t in tids}), ["hs_timestamp"])
+    for cid, tids in call_assoc.items():
+        if cid not in result:
+            continue
+        result[cid]["calls"] = len(tids)
+        stamps = sorted((call_props.get(t, {}).get("hs_timestamp") or "" for t in tids), reverse=True)
+        result[cid]["last_call_at"] = stamps[0] if stamps else ""
+
+    email_assoc = _fetch_contact_engagement_assoc("emails", contact_ids)
+    email_props = _fetch_engagement_props("emails", sorted({t for tids in email_assoc.values() for t in tids}), ["hs_timestamp"])
+    for cid, tids in email_assoc.items():
+        if cid not in result:
+            continue
+        result[cid]["emails"] = len(tids)
+        stamps = sorted((email_props.get(t, {}).get("hs_timestamp") or "" for t in tids), reverse=True)
+        result[cid]["last_email_at"] = stamps[0] if stamps else ""
+
+    return result
+
+
+def get_cloudtango_outreach_cached(force=False):
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _CLOUDTANGO_OUTREACH_CACHE["data"]
+    if not force and cached and (now_ts - _CLOUDTANGO_OUTREACH_CACHE["ts"] < CLOUDTANGO_OUTREACH_CACHE_TTL):
+        return cached
+    contacts = get_cloudtango_contacts_cached(force=force)
+    outreach = fetch_cloudtango_outreach_live(list(contacts.keys()))
+    _CLOUDTANGO_OUTREACH_CACHE["data"] = outreach
+    _CLOUDTANGO_OUTREACH_CACHE["ts"] = now_ts
+    return outreach
+
+
+@app.route("/cloud-tango")
+@tab_required('cloud_tango')
+def cloud_tango_page():
+    return render_template("cloud_tango.html")
+
+
+@app.route("/api/cloud-tango/summary")
+@tab_required('cloud_tango')
+def cloud_tango_summary():
+    force = request.args.get("refresh") == "1"
+    contacts = get_cloudtango_contacts_cached(force=force)
+    outreach = get_cloudtango_outreach_cached(force=force)
+    owners = {o["id"]: o["name"] for o in fetch_hubspot_owners()}
+
+    contacted_call = contacted_email = contacted_either = never_contacted = 0
+    tasks_total = tasks_completed = tasks_open = 0
+    by_owner = {}
+
+    for cid, c in contacts.items():
+        o = outreach.get(cid, {})
+        has_call = o.get("calls", 0) > 0
+        has_email = o.get("emails", 0) > 0
+        if has_call:
+            contacted_call += 1
+        if has_email:
+            contacted_email += 1
+        if has_call or has_email:
+            contacted_either += 1
+        else:
+            never_contacted += 1
+        tasks_total += o.get("tasks_total", 0)
+        tasks_completed += o.get("tasks_completed", 0)
+        tasks_open += o.get("tasks_open", 0)
+
+        owner_name = owners.get(c.get("owner_id", ""), "") or "Unassigned"
+        row = by_owner.setdefault(owner_name, {
+            "total": 0, "contacted": 0, "never": 0, "tasks_completed": 0, "tasks_open": 0,
+        })
+        row["total"] += 1
+        row["contacted" if (has_call or has_email) else "never"] += 1
+        row["tasks_completed"] += o.get("tasks_completed", 0)
+        row["tasks_open"] += o.get("tasks_open", 0)
+
+    leaderboard = sorted(
+        [{"owner": o, **v} for o, v in by_owner.items()],
+        key=lambda x: x["total"], reverse=True,
+    )
+
+    return jsonify({
+        "total": len(contacts),
+        "contacted_call": contacted_call,
+        "contacted_email": contacted_email,
+        "contacted_either": contacted_either,
+        "never_contacted": never_contacted,
+        "tasks_total": tasks_total,
+        "tasks_completed": tasks_completed,
+        "tasks_open": tasks_open,
+        "leaderboard": leaderboard,
+    })
+
+
+@app.route("/api/cloud-tango/contacts")
+@tab_required('cloud_tango')
+def cloud_tango_contacts():
+    status = request.args.get("status", "all")
+    owner_filter = request.args.get("owner", "all")
+    q = (request.args.get("q") or "").strip().lower()
+    page = max(1, int(request.args.get("page", 1) or 1))
+    per_page = min(100, max(1, int(request.args.get("per_page", 50) or 50)))
+
+    contacts = get_cloudtango_contacts_cached(force=request.args.get("refresh") == "1")
+    outreach = get_cloudtango_outreach_cached()
+    owners = {o["id"]: o["name"] for o in fetch_hubspot_owners()}
+
+    filtered = []
+    for cid, c in contacts.items():
+        o = outreach.get(cid, {})
+        has_call = o.get("calls", 0) > 0
+        has_email = o.get("emails", 0) > 0
+        owner_name = owners.get(c.get("owner_id", ""), "") or "Unassigned"
+
+        if status == "never" and (has_call or has_email):
+            continue
+        if status == "call" and not has_call:
+            continue
+        if status == "email" and not has_email:
+            continue
+        if status == "open_task" and o.get("tasks_open", 0) == 0:
+            continue
+        if status == "no_open_task" and o.get("tasks_open", 0) > 0:
+            continue
+        if owner_filter != "all" and owner_name != owner_filter:
+            continue
+        if q:
+            hay = f"{c.get('company','')} {c.get('name','')} {c.get('email','')}".lower()
+            if q not in hay:
+                continue
+
+        filtered.append({
+            "id": cid, "company": c.get("company", ""), "name": c.get("name", ""),
+            "email": c.get("email", ""), "owner": owner_name,
+            "calls": o.get("calls", 0), "last_call_at": o.get("last_call_at", ""),
+            "emails": o.get("emails", 0), "last_email_at": o.get("last_email_at", ""),
+            "tasks_total": o.get("tasks_total", 0), "tasks_completed": o.get("tasks_completed", 0),
+            "tasks_open": o.get("tasks_open", 0),
+            "hubspot_url": f"https://app.hubspot.com/contacts/23416553/record/0-1/{cid}",
+        })
+
+    filtered.sort(key=lambda c: (c.get("company") or "").lower())
     total = len(filtered)
     start = (page - 1) * per_page
     rows = filtered[start:start + per_page]
