@@ -107,7 +107,7 @@
   </svg>
   <div>
     <h1>AI SDRs</h1>
-    <p>Calls and dispositions on contacts assigned to an AI SDR (<span id="propList">RS AI SDR</span>)</p>
+    <p>Sales AI call results (logged as HubSpot notes) for contacts assigned to an AI SDR (<span id="propList">RS AI SDR</span>)</p>
   </div>
   <div class="header-nav">
     {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
@@ -133,6 +133,9 @@
         <option value="90">Last 90 days</option>
         <option value="0">All time</option>
       </select>
+      <label style="font-size:.84rem;color:#c9cad8;display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="includeTests" /> Include test calls <span class="sub" style="display:inline" id="testHint"></span>
+      </label>
       <button class="btn btn-ghost" id="refreshBtn" type="button">↻ Refresh from HubSpot</button>
       <span id="loadingHint" style="font-size:.8rem;color:#5c607a;"></span>
     </div>
@@ -150,15 +153,9 @@
     </table>
   </div>
 
-  <div class="two-col">
-    <div class="panel">
-      <h2>Dispositions <span class="sub" style="display:inline">— click one to filter the call log</span></h2>
-      <ul class="disp-list" id="dispList"></ul>
-    </div>
-    <div class="panel">
-      <h2>Logged By <span class="sub" style="display:inline">— HubSpot user each call was logged under</span></h2>
-      <ul class="disp-list" id="loggedByList"></ul>
-    </div>
+  <div class="panel">
+    <h2>Call Outcomes <span class="sub" style="display:inline">— click one to filter the call log</span></h2>
+    <ul class="disp-list" id="dispList"></ul>
   </div>
 
   <div class="panel">
@@ -172,6 +169,7 @@
         <option value="all">All assigned contacts</option>
         <option value="called">Called</option>
         <option value="not_called">Not called yet</option>
+        <option value="meeting">Meeting booked</option>
       </select>
     </div>
     <div class="table-wrap">
@@ -197,6 +195,7 @@ let currentDisposition = 'all';
 let currentView = 'calls';
 let currentStatus = 'all';
 let currentQuery = '';
+let includeTests = false;
 let searchDebounce = null;
 
 function esc(s) {
@@ -215,11 +214,7 @@ function fmtDuration(sec) {
 }
 function dispPill(label) {
   if (!label) return '<span class="sub">—</span>';
-  let cls = 'pill-pending';
-  if (label === 'Contact pitch - meeting set') cls = 'pill-good';
-  else if (label === 'Connected' || label.startsWith('Contact pitch - meeting pending') || label.startsWith('Contact pitch - more info')) cls = 'pill-good';
-  else if (label.includes('no interest') || label.includes('DNC') || label === 'Wrong number') cls = 'pill-bad';
-  else if (label === 'Left voicemail' || label === 'Left live message' || label === 'Gatekeeper block') cls = 'pill-warn';
+  const cls = {'Meeting booked': 'pill-good', 'Answered': 'pill-good', 'Did not answer / voicemail': 'pill-warn', 'Call error': 'pill-bad'}[label] || 'pill-pending';
   return `<span class="pill ${cls}">${esc(label)}</span>`;
 }
 
@@ -234,7 +229,7 @@ function barList(items, total, clickable) {
 }
 
 async function loadSummary(refresh) {
-  const params = new URLSearchParams({ai_sdr: currentSdr, days: currentDays});
+  const params = new URLSearchParams({ai_sdr: currentSdr, days: currentDays, include_tests: includeTests ? '1' : '0'});
   if (refresh) params.set('refresh', '1');
   const data = await (await fetch(`/api/ai-sdrs/summary?${params}`)).json();
 
@@ -272,24 +267,24 @@ async function loadSummary(refresh) {
     setView('calls');
     loadSummary();
   }));
-  document.getElementById('loggedByList').innerHTML = barList(data.logged_by, data.calls, false);
+  document.getElementById('testHint').textContent = data.test_calls_hidden ? `(${data.test_calls_hidden} hidden)` : '';
 }
 
 const HEADS = {
-  calls: '<tr><th>Date</th><th>Company / Contact</th><th>AI SDR</th><th>Disposition</th><th>Duration</th><th>Logged By</th></tr>',
-  contacts: '<tr><th>Company / Contact</th><th>AI SDR</th><th>Assigned</th><th>Calls</th><th>Last Call</th><th>Last Disposition</th></tr>',
+  calls: '<tr><th>Date</th><th>Company / Contact</th><th>AI SDR</th><th>Outcome</th><th>Duration</th><th>Summary</th></tr>',
+  contacts: '<tr><th>Company / Contact</th><th>AI SDR</th><th>Assigned</th><th>Calls</th><th>Last Call</th><th>Last Outcome</th></tr>',
 };
 
 function contactCell(r) {
-  return `<span class="company-cell">${esc(r.company) || '(no company)'}</span>
+  return `<span class="company-cell">${esc(r.company) || '(no company)'}${r.is_test ? ' <span class="pill pill-pending">test</span>' : ''}</span>
     <span class="sub">${esc(r.name)} ${r.email ? '· ' + esc(r.email) : ''}</span>
-    <a class="hs-link" href="${r.hubspot_url}" target="_blank" rel="noopener">View in HubSpot →</a>`;
+    ${r.hubspot_url ? `<a class="hs-link" href="${r.hubspot_url}" target="_blank" rel="noopener">View in HubSpot →</a>` : '<span class="sub">No contact linked</span>'}`;
 }
 
 async function loadTable() {
   document.getElementById('loadingHint').textContent = 'Loading…';
   document.getElementById('tableHead').innerHTML = HEADS[currentView];
-  const params = new URLSearchParams({page: currentPage, per_page: perPage, ai_sdr: currentSdr, days: currentDays});
+  const params = new URLSearchParams({page: currentPage, per_page: perPage, ai_sdr: currentSdr, days: currentDays, include_tests: includeTests ? '1' : '0'});
   let url;
   if (currentView === 'calls') {
     params.set('disposition', currentDisposition);
@@ -313,7 +308,8 @@ async function loadTable() {
         <td>${esc(r.ai_sdr)}</td>
         <td>${dispPill(r.disposition)}</td>
         <td>${fmtDuration(r.duration_sec)}</td>
-        <td>${esc(r.logged_by)}</td>
+        <td style="max-width:460px;white-space:normal;">${esc(r.summary) || '<span class="sub">No summary</span>'}
+          ${r.salesai_url ? `<a class="hs-link" style="display:block;margin-top:3px" href="${esc(r.salesai_url)}" target="_blank" rel="noopener">View call in SalesAI →</a>` : ''}</td>
       </tr>`).join('');
   } else {
     tbody.innerHTML = data.rows.map(r => `
@@ -323,7 +319,7 @@ async function loadTable() {
         <td>${fmtDate(r.assigned_at)}</td>
         <td>${r.calls ? `<span class="pill pill-good">${r.calls}</span>` : '<span class="pill pill-pending">0</span>'}</td>
         <td>${r.last_call_at ? fmtDate(r.last_call_at) : '<span class="sub">Never</span>'}</td>
-        <td>${dispPill(r.last_disposition)}</td>
+        <td style="max-width:420px;white-space:normal;">${dispPill(r.last_disposition)}${r.last_summary ? `<span class="sub" style="margin-top:3px">${esc(r.last_summary)}</span>` : ''}</td>
       </tr>`).join('');
   }
 
@@ -346,6 +342,7 @@ function setView(view) {
 document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
 document.getElementById('sdrFilter').addEventListener('change', e => { currentSdr = e.target.value; currentPage = 1; loadSummary(); loadTable(); });
 document.getElementById('daysFilter').addEventListener('change', e => { currentDays = e.target.value; currentPage = 1; loadSummary(); loadTable(); });
+document.getElementById('includeTests').addEventListener('change', e => { includeTests = e.target.checked; currentPage = 1; loadSummary(); loadTable(); });
 document.getElementById('statusFilter').addEventListener('change', e => { currentStatus = e.target.value; currentPage = 1; loadTable(); });
 document.getElementById('searchBox').addEventListener('input', e => {
   clearTimeout(searchDebounce);
