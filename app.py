@@ -26,6 +26,7 @@ TAB_DEFS = [
     ("msp_data",      "MSP Data"),
     ("sales_activity", "RS Sales Activity"),
     ("cloud_tango",   "Cloud Tango"),
+    ("ai_sdrs",       "AI SDRs"),
     ("admin",         "Admin"),
 ]
 TAB_KEYS = [key for key, _ in TAB_DEFS]
@@ -492,6 +493,7 @@ def first_accessible_url(user):
             return url_for({"dashboard": "index", "hs_workflows": "hs_workflows_page",
                             "pull_contacts": "pull_contacts_page", "msp_data": "msp_data_page",
                             "sales_activity": "sales_activity_page", "cloud_tango": "cloud_tango_page",
+                            "ai_sdrs": "ai_sdrs_page",
                             "admin": "admin"}[key])
     return url_for("no_access")
 
@@ -3522,6 +3524,281 @@ def cloud_tango_contacts():
     rows = filtered[start:start + per_page]
 
     return jsonify({"total": total, "page": page, "per_page": per_page, "rows": rows})
+
+
+# ============================================================================
+# AI SDRs — calls + dispositions for contacts assigned to an outsourced AI SDR
+# (Sales AI). Any contact property named *_ai_sdr (RS AI SDR, LAIT AI SDR, ...)
+# counts as an AI SDR assignment; the selected option is the AI SDR's name.
+# ============================================================================
+
+AI_SDR_CONTACT_PROPS = ["firstname", "lastname", "email", "company", "hubspot_owner_id"]
+AI_SDR_CALL_PROPS = ["hs_timestamp", "hs_call_disposition", "hubspot_owner_id", "hs_call_source",
+                     "hs_call_duration", "hs_call_title", "hs_call_direction", "hs_call_status"]
+_AI_SDR_CACHE = {"data": None, "ts": 0}
+AI_SDR_CACHE_TTL = 600  # seconds
+
+
+def fetch_ai_sdr_properties():
+    """[(property name, label), ...] for every contact property ending in _ai_sdr."""
+    resp = requests.get(f"{BASE_URL}/crm/v3/properties/contacts", headers=HEADERS, timeout=30)
+    if not resp.ok:
+        return []
+    return sorted((p["name"], p["label"]) for p in resp.json().get("results", [])
+                  if p["name"].endswith("_ai_sdr") and not p.get("archived"))
+
+
+def fetch_call_dispositions():
+    resp = requests.get(f"{BASE_URL}/calling/v1/dispositions", headers=HEADERS, timeout=30)
+    if not resp.ok:
+        return {}
+    return {d["id"]: d["label"] for d in resp.json()}
+
+
+def _fetch_ai_sdr_contacts(prop_names):
+    """contact id -> info + {"assignments": [(prop, ai_sdr, assigned_at)]}.
+
+    assigned_at comes from property history (when the current value was set),
+    so calls made by a rep before the contact was handed to the AI SDR don't
+    get credited to it.
+    """
+    ids = set()
+    for prop in prop_names:
+        after = None
+        while True:
+            body = {"filterGroups": [{"filters": [{"propertyName": prop, "operator": "HAS_PROPERTY"}]}],
+                    "properties": ["hs_object_id"], "limit": 200}
+            if after:
+                body["after"] = after
+            resp = requests.post(f"{BASE_URL}/crm/v3/objects/contacts/search", headers=HEADERS, json=body, timeout=30)
+            if not resp.ok:
+                break
+            data = resp.json()
+            ids.update(r["id"] for r in data.get("results", []))
+            after = data.get("paging", {}).get("next", {}).get("after")
+            if not after:
+                break
+
+    contacts = {}
+
+    def fetch_chunk(chunk):
+        resp = requests.post(
+            f"{BASE_URL}/crm/v3/objects/contacts/batch/read", headers=HEADERS,
+            json={"inputs": [{"id": c} for c in chunk], "properties": AI_SDR_CONTACT_PROPS,
+                  "propertiesWithHistory": prop_names}, timeout=30,
+        )
+        return resp.json().get("results", []) if resp.ok else []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        for results in ex.map(fetch_chunk, list(_chunks(sorted(ids), 50))):
+            for r in results:
+                props = r.get("properties") or {}
+                history = r.get("propertiesWithHistory") or {}
+                assignments = []
+                for prop in prop_names:
+                    versions = history.get(prop) or []  # newest first
+                    if versions and versions[0].get("value"):
+                        assignments.append((prop, versions[0]["value"], versions[0].get("timestamp", "")))
+                if not assignments:
+                    continue
+                contacts[r["id"]] = {
+                    "name": f"{props.get('firstname') or ''} {props.get('lastname') or ''}".strip(),
+                    "email": props.get("email") or "",
+                    "company": props.get("company") or "",
+                    "owner_id": props.get("hubspot_owner_id") or "",
+                    "assignments": assignments,
+                }
+    return contacts
+
+
+def fetch_ai_sdr_data_live():
+    sdr_props = fetch_ai_sdr_properties()
+    prop_names = [p for p, _ in sdr_props]
+    contacts = _fetch_ai_sdr_contacts(prop_names) if prop_names else {}
+    call_assoc = _fetch_contact_engagement_assoc("calls", list(contacts.keys())) if contacts else {}
+    call_props = _fetch_engagement_props("calls", sorted({t for tids in call_assoc.values() for t in tids}), AI_SDR_CALL_PROPS)
+
+    # One row per (call, AI SDR assignment) where the call happened on/after
+    # the assignment -- a contact assigned to two AI SDRs credits each.
+    calls = []
+    for cid, c in contacts.items():
+        for call_id in call_assoc.get(cid, []):
+            p = call_props.get(call_id) or {}
+            ts = p.get("hs_timestamp") or ""
+            for prop, ai_sdr, assigned_at in c["assignments"]:
+                if ts and assigned_at and ts < assigned_at:
+                    continue
+                calls.append({"call_id": call_id, "contact_id": cid, "prop": prop, "ai_sdr": ai_sdr,
+                              "timestamp": ts, "disposition_id": p.get("hs_call_disposition") or "",
+                              "owner_id": p.get("hubspot_owner_id") or "", "source": p.get("hs_call_source") or "",
+                              "duration_ms": int(p.get("hs_call_duration") or 0), "title": p.get("hs_call_title") or "",
+                              "direction": p.get("hs_call_direction") or "", "status": p.get("hs_call_status") or ""})
+    return {"sdr_props": sdr_props, "contacts": contacts, "calls": calls}
+
+
+def get_ai_sdr_data_cached(force=False):
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _AI_SDR_CACHE["data"]
+    if not force and cached and (now_ts - _AI_SDR_CACHE["ts"] < AI_SDR_CACHE_TTL):
+        return cached
+    data = fetch_ai_sdr_data_live()
+    _AI_SDR_CACHE["data"] = data
+    _AI_SDR_CACHE["ts"] = now_ts
+    return data
+
+
+def _ai_sdr_filtered_calls(data, ai_sdr, days):
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat() if days else ""
+    return [c for c in data["calls"]
+            if (ai_sdr == "all" or c["ai_sdr"] == ai_sdr) and (not cutoff or c["timestamp"] >= cutoff)]
+
+
+def _ai_sdr_days_arg():
+    try:
+        return max(0, int(request.args.get("days", 30) or 0))
+    except ValueError:
+        return 30
+
+
+@app.route("/ai-sdrs")
+@tab_required('ai_sdrs')
+def ai_sdrs_page():
+    return render_template("ai_sdrs.html")
+
+
+@app.route("/api/ai-sdrs/summary")
+@tab_required('ai_sdrs')
+def ai_sdrs_summary():
+    data = get_ai_sdr_data_cached(force=request.args.get("refresh") == "1")
+    ai_sdr = request.args.get("ai_sdr", "all")
+    days = _ai_sdr_days_arg()
+    dispositions = fetch_call_dispositions()
+    owners = {o["id"]: o for o in fetch_hubspot_owners()}
+    prop_labels = dict(data["sdr_props"])
+    calls = _ai_sdr_filtered_calls(data, ai_sdr, days)
+
+    by_sdr = {}
+    for cid, c in data["contacts"].items():
+        for prop, name, _ in c["assignments"]:
+            row = by_sdr.setdefault(name, {"ai_sdr": name, "property": prop_labels.get(prop, prop),
+                                           "assigned": 0, "called": set(), "calls": 0, "connected": 0,
+                                           "meetings": 0, "talk_ms": 0, "dispositions": {}})
+            row["assigned"] += 1
+    for c in calls:
+        row = by_sdr.get(c["ai_sdr"])
+        if not row:
+            continue
+        label = dispositions.get(c["disposition_id"], "") or ("No disposition" if not c["disposition_id"] else c["disposition_id"])
+        row["calls"] += 1
+        row["called"].add(c["contact_id"])
+        row["talk_ms"] += c["duration_ms"]
+        row["dispositions"][label] = row["dispositions"].get(label, 0) + 1
+        if label == "Connected" or label.startswith("Contact pitch") or label == "Contact reached - no pitch":
+            row["connected"] += 1
+        if label == "Contact pitch - meeting set":
+            row["meetings"] += 1
+
+    leaderboard = []
+    for name, row in sorted(by_sdr.items()):
+        if ai_sdr != "all" and name != ai_sdr:
+            continue
+        row["called"] = len(row["called"])
+        row["talk_minutes"] = round(row.pop("talk_ms") / 60000, 1)
+        leaderboard.append(row)
+
+    disposition_totals = {}
+    logged_by = {}
+    for c in calls:
+        label = dispositions.get(c["disposition_id"], "") or ("No disposition" if not c["disposition_id"] else c["disposition_id"])
+        disposition_totals[label] = disposition_totals.get(label, 0) + 1
+        owner = owners.get(c["owner_id"])
+        who = (owner["name"] + (f" ({owner['email']})" if owner.get("email") else "")) if owner else "No owner"
+        logged_by[who] = logged_by.get(who, 0) + 1
+
+    return jsonify({
+        "ai_sdrs": sorted(by_sdr.keys()),
+        "properties": [label for _, label in data["sdr_props"]],
+        "assigned": sum(r["assigned"] for r in leaderboard),
+        "calls": len(calls),
+        "contacts_called": len({c["contact_id"] for c in calls}),
+        "connected": sum(r["connected"] for r in leaderboard),
+        "meetings": sum(r["meetings"] for r in leaderboard),
+        "leaderboard": leaderboard,
+        "dispositions": sorted(disposition_totals.items(), key=lambda kv: kv[1], reverse=True),
+        "logged_by": sorted(logged_by.items(), key=lambda kv: kv[1], reverse=True),
+    })
+
+
+@app.route("/api/ai-sdrs/calls")
+@tab_required('ai_sdrs')
+def ai_sdrs_calls():
+    data = get_ai_sdr_data_cached()
+    ai_sdr = request.args.get("ai_sdr", "all")
+    disposition = request.args.get("disposition", "all")
+    days = _ai_sdr_days_arg()
+    page = max(1, int(request.args.get("page", 1) or 1))
+    per_page = min(100, max(1, int(request.args.get("per_page", 50) or 50)))
+    dispositions = fetch_call_dispositions()
+    owners = {o["id"]: o["name"] for o in fetch_hubspot_owners()}
+
+    rows = []
+    for c in _ai_sdr_filtered_calls(data, ai_sdr, days):
+        label = dispositions.get(c["disposition_id"], "") or ("No disposition" if not c["disposition_id"] else c["disposition_id"])
+        if disposition != "all" and label != disposition:
+            continue
+        contact = data["contacts"].get(c["contact_id"], {})
+        rows.append({
+            "timestamp": c["timestamp"], "ai_sdr": c["ai_sdr"], "disposition": label,
+            "duration_sec": round(c["duration_ms"] / 1000), "title": c["title"],
+            "logged_by": owners.get(c["owner_id"], "") or "No owner",
+            "name": contact.get("name", ""), "company": contact.get("company", ""), "email": contact.get("email", ""),
+            "hubspot_url": f"https://app.hubspot.com/contacts/23416553/record/0-1/{c['contact_id']}",
+        })
+    rows.sort(key=lambda r: r["timestamp"], reverse=True)
+    total = len(rows)
+    start = (page - 1) * per_page
+    return jsonify({"total": total, "page": page, "per_page": per_page, "rows": rows[start:start + per_page]})
+
+
+@app.route("/api/ai-sdrs/contacts")
+@tab_required('ai_sdrs')
+def ai_sdrs_contacts():
+    data = get_ai_sdr_data_cached()
+    ai_sdr = request.args.get("ai_sdr", "all")
+    status = request.args.get("status", "all")
+    q = (request.args.get("q") or "").strip().lower()
+    page = max(1, int(request.args.get("page", 1) or 1))
+    per_page = min(100, max(1, int(request.args.get("per_page", 50) or 50)))
+    dispositions = fetch_call_dispositions()
+
+    calls_by_key = {}
+    for c in data["calls"]:
+        calls_by_key.setdefault((c["contact_id"], c["ai_sdr"]), []).append(c)
+
+    rows = []
+    for cid, contact in data["contacts"].items():
+        for prop, name, assigned_at in contact["assignments"]:
+            if ai_sdr != "all" and name != ai_sdr:
+                continue
+            calls = sorted(calls_by_key.get((cid, name), []), key=lambda c: c["timestamp"], reverse=True)
+            if status == "called" and not calls:
+                continue
+            if status == "not_called" and calls:
+                continue
+            if q and q not in f"{contact['company']} {contact['name']} {contact['email']}".lower():
+                continue
+            last = calls[0] if calls else None
+            rows.append({
+                "name": contact["name"], "company": contact["company"], "email": contact["email"],
+                "ai_sdr": name, "assigned_at": assigned_at, "calls": len(calls),
+                "last_call_at": last["timestamp"] if last else "",
+                "last_disposition": (dispositions.get(last["disposition_id"], "") or "No disposition") if last else "",
+                "hubspot_url": f"https://app.hubspot.com/contacts/23416553/record/0-1/{cid}",
+            })
+    rows.sort(key=lambda r: r["assigned_at"], reverse=True)
+    total = len(rows)
+    start = (page - 1) * per_page
+    return jsonify({"total": total, "page": page, "per_page": per_page, "rows": rows[start:start + per_page]})
 
 
 @app.route("/api/pull-contacts/searches")

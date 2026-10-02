@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI SDRs — Deal Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #0f1117; color: #e8e9f0; min-height: 100vh; }
+
+    header {
+      background: #0d0e1a; color: #e8e9f0;
+      padding: 16px 32px; display: flex; align-items: center; gap: 14px;
+      border-bottom: 1px solid #2a2d3e; box-shadow: 0 2px 12px rgba(0,0,0,.4);
+    }
+    header h1 { font-size: 1.15rem; font-weight: 700; }
+    header p { font-size: .82rem; color: #8b8fa8; margin-top: 2px; }
+    .header-nav { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+    .nav-link {
+      padding: 7px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600;
+      text-decoration: none; color: #c9cad8; background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1); transition: background .15s;
+    }
+    .nav-link:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
+    .nav-link.active { background: #ff5c35; color: #fff; border-color: #ff5c35; }
+
+    .main { padding: 28px 36px 60px; }
+
+    .summary-strip { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+    .summary-chip {
+      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 10px;
+      padding: 12px 18px; font-size: .8rem; color: #8b8fa8; min-width: 130px; cursor: pointer;
+    }
+    .summary-chip.active { border-color: #ff5c35; }
+    .summary-chip .num { display: block; font-size: 1.4rem; font-weight: 700; color: #e8e9f0; margin-bottom: 2px; }
+    .summary-chip.good .num { color: #22c55e; }
+    .summary-chip.bad .num { color: #f87171; }
+    .summary-chip.warn .num { color: #fbbf24; }
+
+    .panel {
+      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 12px;
+      padding: 18px 20px; margin-bottom: 18px;
+    }
+    .panel h2 { font-size: .95rem; font-weight: 700; color: #e8e9f0; margin-bottom: 14px; }
+
+    .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .toolbar input[type="text"], .toolbar select {
+      border: 1px solid #2a2d3e; border-radius: 6px; padding: 8px 12px;
+      font-size: .86rem; font-family: inherit; color: #e8e9f0; background: #14151f; outline: none;
+    }
+    .toolbar input[type="text"] { flex: 1; min-width: 220px; }
+    .toolbar input:focus, .toolbar select:focus { border-color: #ff5c35; }
+    .btn { padding: 8px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600; cursor: pointer; border: none; transition: background .15s; }
+    .btn-primary { background: #ff5c35; color: #fff; }
+    .btn-primary:hover { background: #e04d2a; }
+    .btn-ghost { background: rgba(255,255,255,.06); color: #c9cad8; border: 1px solid #2a2d3e; }
+    .btn-ghost:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
+
+    .leaderboard-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+    .leaderboard-table th { text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .4px; color: #8b8fa8; padding: 8px 10px; border-bottom: 1px solid #2a2d3e; }
+    .leaderboard-table td { padding: 8px 10px; border-bottom: 1px solid #22243a; color: #c9cad8; }
+    .leaderboard-table tr:last-child td { border-bottom: none; }
+    .leaderboard-table .owner-cell { font-weight: 600; color: #e8e9f0; }
+    .bar-wrap { display: flex; align-items: center; gap: 8px; }
+    .bar-track { flex: 1; height: 8px; border-radius: 4px; background: #14151f; overflow: hidden; min-width: 80px; }
+    .bar-fill { height: 100%; background: #ff5c35; border-radius: 4px; }
+
+    table.data-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    .data-table th { text-align: left; font-size: .68rem; text-transform: uppercase; letter-spacing: .4px; color: #8b8fa8; padding: 9px 10px; border-bottom: 1px solid #2a2d3e; white-space: nowrap; position: sticky; top: 0; background: #1e2030; }
+    .data-table td { padding: 8px 10px; border-bottom: 1px solid #22243a; color: #c9cad8; vertical-align: middle; }
+    .data-table tr:hover td { background: rgba(255,255,255,.02); }
+    .table-wrap { max-height: 58vh; overflow-y: auto; overflow-x: auto; border: 1px solid #2a2d3e; border-radius: 8px; }
+    .company-cell { font-weight: 600; color: #e8e9f0; }
+    .sub { display: block; font-size: .72rem; color: #5c607a; }
+
+    .pill { display: inline-block; font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; letter-spacing: .2px; white-space: nowrap; }
+    .pill-good { background: rgba(34,197,94,.15); color: #4ade80; }
+    .pill-warn { background: rgba(251,191,36,.15); color: #fbbf24; }
+    .pill-bad  { background: rgba(248,113,113,.15); color: #f87171; }
+    .pill-pending { background: rgba(139,143,168,.15); color: #8b8fa8; }
+    .hs-link { color: #60a5fa; text-decoration: none; font-size: .74rem; }
+    .hs-link:hover { text-decoration: underline; }
+
+    .pagination { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: .84rem; color: #8b8fa8; }
+    .empty-hint { color: #5c607a; font-size: .85rem; padding: 30px 0; text-align: center; }
+  
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+    .disp-list { list-style: none; }
+    .disp-list li { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: .84rem; color: #c9cad8; cursor: pointer; }
+    .disp-list li:hover .disp-label { color: #e8e9f0; }
+    .disp-list li.active .disp-label { color: #ff5c35; font-weight: 600; }
+    .disp-label { width: 220px; flex-shrink: 0; }
+    .disp-count { width: 40px; text-align: right; font-weight: 600; color: #e8e9f0; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+    .tab-btn { padding: 6px 14px; border-radius: 6px; font-size: .82rem; font-weight: 600; cursor: pointer; background: rgba(255,255,255,.06); color: #c9cad8; border: 1px solid #2a2d3e; }
+    .tab-btn.active { background: #ff5c35; color: #fff; border-color: #ff5c35; }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="rgba(255,255,255,.2)"/>
+    <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>AI SDRs</h1>
+    <p>Calls and dispositions on contacts assigned to an AI SDR (<span id="propList">RS AI SDR</span>)</p>
+  </div>
+  <div class="header-nav">
+    {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
+    {% if current_user.is_owner or 'msp_data' in current_user.tabs %}<a href="/msp-data" class="nav-link">MSP Data</a>{% endif %}
+    {% if current_user.is_owner or 'sales_activity' in current_user.tabs %}<a href="/sales-activity" class="nav-link">RS Sales Activity</a>{% endif %}
+    {% if current_user.is_owner or 'cloud_tango' in current_user.tabs %}<a href="/cloud-tango" class="nav-link">Cloud Tango</a>{% endif %}
+    <a href="/ai-sdrs" class="nav-link active">AI SDRs</a>
+    {% if current_user.is_owner or 'dashboard' in current_user.tabs %}<a href="/" class="nav-link">← Deal Alloc</a>{% endif %}
+    <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
+    {% if current_user.is_owner or 'hs_workflows' in current_user.tabs %}<a href="/hs-workflows" class="nav-link">HS Workflows</a>{% endif %}
+    {% if current_user.is_owner or 'admin' in current_user.tabs %}<a href="/admin" class="nav-link">Admin</a>{% endif %}
+    <a href="/logout" class="nav-link">Log Out</a>
+  </div>
+</header>
+
+<div class="main">
+  <div class="panel">
+    <div class="toolbar">
+      <select id="sdrFilter"><option value="all">All AI SDRs</option></select>
+      <select id="daysFilter">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="0">All time</option>
+      </select>
+      <button class="btn btn-ghost" id="refreshBtn" type="button">↻ Refresh from HubSpot</button>
+      <span id="loadingHint" style="font-size:.8rem;color:#5c607a;"></span>
+    </div>
+  </div>
+
+  <div class="summary-strip" id="summaryStrip"></div>
+
+  <div class="panel">
+    <h2>By AI SDR</h2>
+    <table class="leaderboard-table">
+      <thead>
+        <tr><th>AI SDR</th><th>Property</th><th>Contacts Assigned</th><th>Contacts Called</th><th>Calls</th><th>Connected</th><th>Meetings Set</th><th>Talk Time (min)</th></tr>
+      </thead>
+      <tbody id="leaderboardBody"></tbody>
+    </table>
+  </div>
+
+  <div class="two-col">
+    <div class="panel">
+      <h2>Dispositions <span class="sub" style="display:inline">— click one to filter the call log</span></h2>
+      <ul class="disp-list" id="dispList"></ul>
+    </div>
+    <div class="panel">
+      <h2>Logged By <span class="sub" style="display:inline">— HubSpot user each call was logged under</span></h2>
+      <ul class="disp-list" id="loggedByList"></ul>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="tabs">
+      <button class="tab-btn active" data-view="calls" type="button">Call Log</button>
+      <button class="tab-btn" data-view="contacts" type="button">Assigned Contacts</button>
+    </div>
+    <div class="toolbar" id="contactsToolbar" style="display:none;margin-bottom:12px;">
+      <input type="text" id="searchBox" placeholder="Search company, email, or name..." />
+      <select id="statusFilter">
+        <option value="all">All assigned contacts</option>
+        <option value="called">Called</option>
+        <option value="not_called">Not called yet</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead id="tableHead"></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <button class="btn btn-ghost" id="prevPage" type="button">← Prev</button>
+      <span id="pageInfo"></span>
+      <button class="btn btn-ghost" id="nextPage" type="button">Next →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentPage = 1;
+const perPage = 50;
+let currentSdr = 'all';
+let currentDays = '30';
+let currentDisposition = 'all';
+let currentView = 'calls';
+let currentStatus = 'all';
+let currentQuery = '';
+let searchDebounce = null;
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleString(undefined, {month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'});
+}
+function fmtDuration(sec) {
+  if (!sec) return '—';
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+function dispPill(label) {
+  if (!label) return '<span class="sub">—</span>';
+  let cls = 'pill-pending';
+  if (label === 'Contact pitch - meeting set') cls = 'pill-good';
+  else if (label === 'Connected' || label.startsWith('Contact pitch - meeting pending') || label.startsWith('Contact pitch - more info')) cls = 'pill-good';
+  else if (label.includes('no interest') || label.includes('DNC') || label === 'Wrong number') cls = 'pill-bad';
+  else if (label === 'Left voicemail' || label === 'Left live message' || label === 'Gatekeeper block') cls = 'pill-warn';
+  return `<span class="pill ${cls}">${esc(label)}</span>`;
+}
+
+function barList(items, total, clickable) {
+  if (!items.length) return '<li><span class="sub">No calls logged yet.</span></li>';
+  return items.map(([label, n]) => `
+    <li ${clickable ? `data-disp="${esc(label)}"` : ''} class="${clickable && label === currentDisposition ? 'active' : ''}">
+      <span class="disp-label">${esc(label)}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${(n / Math.max(1, total) * 100).toFixed(0)}%"></div></div>
+      <span class="disp-count">${n.toLocaleString()}</span>
+    </li>`).join('');
+}
+
+async function loadSummary(refresh) {
+  const params = new URLSearchParams({ai_sdr: currentSdr, days: currentDays});
+  if (refresh) params.set('refresh', '1');
+  const data = await (await fetch(`/api/ai-sdrs/summary?${params}`)).json();
+
+  if (data.properties && data.properties.length) document.getElementById('propList').textContent = data.properties.join(', ');
+  const sel = document.getElementById('sdrFilter');
+  sel.innerHTML = '<option value="all">All AI SDRs</option>' + data.ai_sdrs.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  sel.value = currentSdr;
+
+  const connectRate = data.calls ? Math.round(data.connected / data.calls * 100) : 0;
+  const chips = [
+    {label: 'Contacts Assigned', num: data.assigned, cls: ''},
+    {label: 'Contacts Called', num: data.contacts_called, cls: ''},
+    {label: 'Calls Made', num: data.calls, cls: ''},
+    {label: `Connected (${connectRate}%)`, num: data.connected, cls: 'good'},
+    {label: 'Meetings Set', num: data.meetings, cls: 'good'},
+  ];
+  document.getElementById('summaryStrip').innerHTML = chips.map(c => `
+    <div class="summary-chip ${c.cls}" style="cursor:default"><span class="num">${(c.num || 0).toLocaleString()}</span>${c.label}</div>`).join('');
+
+  document.getElementById('leaderboardBody').innerHTML = data.leaderboard.map(l => `
+    <tr>
+      <td class="owner-cell">${esc(l.ai_sdr)}</td>
+      <td>${esc(l.property)}</td>
+      <td>${l.assigned.toLocaleString()}</td>
+      <td>${l.called.toLocaleString()}</td>
+      <td>${l.calls.toLocaleString()}</td>
+      <td>${l.connected.toLocaleString()}</td>
+      <td>${l.meetings.toLocaleString()}</td>
+      <td>${l.talk_minutes.toLocaleString()}</td>
+    </tr>`).join('') || `<tr><td colspan="8"><div class="empty-hint">No contacts are assigned to an AI SDR yet.</div></td></tr>`;
+
+  document.getElementById('dispList').innerHTML = barList(data.dispositions, data.calls, true);
+  document.querySelectorAll('#dispList li[data-disp]').forEach(el => el.addEventListener('click', () => {
+    currentDisposition = currentDisposition === el.dataset.disp ? 'all' : el.dataset.disp;
+    setView('calls');
+    loadSummary();
+  }));
+  document.getElementById('loggedByList').innerHTML = barList(data.logged_by, data.calls, false);
+}
+
+const HEADS = {
+  calls: '<tr><th>Date</th><th>Company / Contact</th><th>AI SDR</th><th>Disposition</th><th>Duration</th><th>Logged By</th></tr>',
+  contacts: '<tr><th>Company / Contact</th><th>AI SDR</th><th>Assigned</th><th>Calls</th><th>Last Call</th><th>Last Disposition</th></tr>',
+};
+
+function contactCell(r) {
+  return `<span class="company-cell">${esc(r.company) || '(no company)'}</span>
+    <span class="sub">${esc(r.name)} ${r.email ? '· ' + esc(r.email) : ''}</span>
+    <a class="hs-link" href="${r.hubspot_url}" target="_blank" rel="noopener">View in HubSpot →</a>`;
+}
+
+async function loadTable() {
+  document.getElementById('loadingHint').textContent = 'Loading…';
+  document.getElementById('tableHead').innerHTML = HEADS[currentView];
+  const params = new URLSearchParams({page: currentPage, per_page: perPage, ai_sdr: currentSdr, days: currentDays});
+  let url;
+  if (currentView === 'calls') {
+    params.set('disposition', currentDisposition);
+    url = `/api/ai-sdrs/calls?${params}`;
+  } else {
+    params.set('status', currentStatus);
+    params.set('q', currentQuery);
+    url = `/api/ai-sdrs/contacts?${params}`;
+  }
+  const data = await (await fetch(url)).json();
+  document.getElementById('loadingHint').textContent = '';
+
+  const tbody = document.getElementById('tableBody');
+  if (!data.rows.length) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-hint">${currentView === 'calls' ? 'No AI SDR calls logged for this filter yet.' : 'No contacts match this filter.'}</div></td></tr>`;
+  } else if (currentView === 'calls') {
+    tbody.innerHTML = data.rows.map(r => `
+      <tr>
+        <td>${fmtDate(r.timestamp)}</td>
+        <td>${contactCell(r)}</td>
+        <td>${esc(r.ai_sdr)}</td>
+        <td>${dispPill(r.disposition)}</td>
+        <td>${fmtDuration(r.duration_sec)}</td>
+        <td>${esc(r.logged_by)}</td>
+      </tr>`).join('');
+  } else {
+    tbody.innerHTML = data.rows.map(r => `
+      <tr>
+        <td>${contactCell(r)}</td>
+        <td>${esc(r.ai_sdr)}</td>
+        <td>${fmtDate(r.assigned_at)}</td>
+        <td>${r.calls ? `<span class="pill pill-good">${r.calls}</span>` : '<span class="pill pill-pending">0</span>'}</td>
+        <td>${r.last_call_at ? fmtDate(r.last_call_at) : '<span class="sub">Never</span>'}</td>
+        <td>${dispPill(r.last_disposition)}</td>
+      </tr>`).join('');
+  }
+
+  const totalPages = Math.max(1, Math.ceil(data.total / perPage));
+  const noun = currentView === 'calls' ? 'calls' : 'contacts';
+  const dispNote = currentView === 'calls' && currentDisposition !== 'all' ? ` · ${currentDisposition}` : '';
+  document.getElementById('pageInfo').textContent = `Page ${data.page} of ${totalPages} (${data.total.toLocaleString()} ${noun}${dispNote})`;
+  document.getElementById('prevPage').disabled = currentPage <= 1;
+  document.getElementById('nextPage').disabled = currentPage >= totalPages;
+}
+
+function setView(view) {
+  currentView = view;
+  currentPage = 1;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  document.getElementById('contactsToolbar').style.display = view === 'contacts' ? 'flex' : 'none';
+  loadTable();
+}
+
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+document.getElementById('sdrFilter').addEventListener('change', e => { currentSdr = e.target.value; currentPage = 1; loadSummary(); loadTable(); });
+document.getElementById('daysFilter').addEventListener('change', e => { currentDays = e.target.value; currentPage = 1; loadSummary(); loadTable(); });
+document.getElementById('statusFilter').addEventListener('change', e => { currentStatus = e.target.value; currentPage = 1; loadTable(); });
+document.getElementById('searchBox').addEventListener('input', e => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => { currentQuery = e.target.value; currentPage = 1; loadTable(); }, 350);
+});
+document.getElementById('refreshBtn').addEventListener('click', async () => {
+  document.getElementById('loadingHint').textContent = 'Refreshing from HubSpot…';
+  await loadSummary(true);
+  await loadTable();
+});
+document.getElementById('prevPage').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadTable(); } });
+document.getElementById('nextPage').addEventListener('click', () => { currentPage++; loadTable(); });
+
+loadSummary().then(loadTable);
+</script>
+
+</body>
+</html>
