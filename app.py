@@ -29,6 +29,7 @@ TAB_DEFS = [
     ("sales_activity", "RS Sales Activity"),
     ("cloud_tango",   "Cloud Tango"),
     ("ai_sdrs",       "AI SDRs"),
+    ("old_deals",     "Old Deal Followup"),
     ("admin",         "Admin"),
 ]
 TAB_KEYS = [key for key, _ in TAB_DEFS]
@@ -37,6 +38,10 @@ TAB_KEYS = [key for key, _ in TAB_DEFS]
 # PULL_CONTACTS_CRON_SECRET -- lets an external script (the MSP cleanup batch
 # process) record verification results without an interactive login session.
 MSP_TRACK_API_SECRET = os.environ.get("MSP_TRACK_API_SECRET", "")
+# Same idea for the Old Deal Followup batch-write API (the "RS Old Deal
+# Followup" agent posts its drafted reconnect emails here). Falls back to the
+# MSP secret so it works before a dedicated one is set on Railway.
+OLD_DEALS_API_SECRET = os.environ.get("OLD_DEALS_API_SECRET", "") or MSP_TRACK_API_SECRET
 
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", os.path.dirname(__file__)), "client_contacts.db")
 
@@ -317,6 +322,29 @@ def init_db():
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS old_deal_followup (
+                deal_id TEXT PRIMARY KEY,
+                batch_label TEXT DEFAULT '',
+                batch_date TEXT DEFAULT '',
+                deal_name TEXT DEFAULT '',
+                deal_stage_label TEXT DEFAULT '',
+                contact_id TEXT DEFAULT '',
+                contact_name TEXT DEFAULT '',
+                contact_email TEXT DEFAULT '',
+                contact_title TEXT DEFAULT '',
+                company TEXT DEFAULT '',
+                last_contacted_before TEXT DEFAULT '',
+                context_summary TEXT DEFAULT '',
+                flag TEXT DEFAULT '',
+                draft_subject TEXT DEFAULT '',
+                draft_body TEXT DEFAULT '',
+                status TEXT DEFAULT 'drafted',
+                status_updated_at TEXT,
+                notes TEXT DEFAULT '',
+                created_at TEXT
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS app_users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -495,7 +523,7 @@ def first_accessible_url(user):
             return url_for({"dashboard": "index", "hs_workflows": "hs_workflows_page",
                             "pull_contacts": "pull_contacts_page", "msp_data": "msp_data_page",
                             "sales_activity": "sales_activity_page", "cloud_tango": "cloud_tango_page",
-                            "ai_sdrs": "ai_sdrs_page",
+                            "ai_sdrs": "ai_sdrs_page", "old_deals": "old_deals_page",
                             "admin": "admin"}[key])
     return url_for("no_access")
 
@@ -3831,6 +3859,256 @@ def ai_sdrs_contacts():
     total = len(rows)
     start = (page - 1) * per_page
     return jsonify({"total": total, "page": page, "per_page": per_page, "rows": rows[start:start + per_page]})
+
+
+# ---------------------------------------------------------------------------
+# Old Deal Followup -- Andrew's recurring "RS Old Deal Followup" motion. Each
+# run an agent takes the 10 open Pipeline 7 deals with the oldest
+# notes_last_contacted (>30 days, or never), drafts a warm reconnect email for
+# each, and POSTs them to /api/old-deals/batch. Andrew sends them himself;
+# this tab tracks progress through the whole stale pool and each deal's state.
+# notes_last_updated is deliberately NOT used: the 2026-07-29 bulk follow-up
+# task sweep bumped it on every Pipeline 7 deal.
+# ---------------------------------------------------------------------------
+OLD_DEALS_PIPELINE_ID = "77097563"  # "7 Runway Selling New Client Pipeline"
+OLD_DEALS_OPEN_STAGE_IDS = [
+    "255728551", "146957437", "146957438", "146957439", "146957441",
+    "146957442", "147976264", "163550904", "163550905", "163550976",
+]
+OLD_DEALS_STALE_DAYS = 30
+OLD_DEALS_STATUSES = ["drafted", "sent", "replied", "meeting_booked", "not_interested", "skip"]
+OLD_DEALS_FIELDS = [
+    "batch_label", "batch_date", "deal_name", "deal_stage_label", "contact_id", "contact_name",
+    "contact_email", "contact_title", "company", "last_contacted_before", "context_summary",
+    "flag", "draft_subject", "draft_body", "notes",
+]
+_OLD_DEALS_CACHE = {"data": None, "ts": 0}
+OLD_DEALS_CACHE_TTL = 600  # seconds
+
+
+def old_deals_write_allowed():
+    sent = request.headers.get("X-API-Secret", "")
+    if OLD_DEALS_API_SECRET and sent and secrets.compare_digest(sent, OLD_DEALS_API_SECRET):
+        return True
+    user = get_current_user()
+    return bool(user and user_has_tab(user, "old_deals"))
+
+
+def _parse_hs_dt(value):
+    """HubSpot datetimes come back as ISO strings; batch_date may be a bare
+    date. Returns an aware UTC datetime, or None."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def fetch_old_deals_live(deal_ids):
+    """Stale-pool size + current notes_last_contacted/dealstage for each tracked deal."""
+    cutoff_ms = str(int((datetime.now(timezone.utc) - timedelta(days=OLD_DEALS_STALE_DAYS)).timestamp() * 1000))
+    base = [
+        {"propertyName": "pipeline", "operator": "EQ", "value": OLD_DEALS_PIPELINE_ID},
+        {"propertyName": "dealstage", "operator": "IN", "values": OLD_DEALS_OPEN_STAGE_IDS},
+    ]
+    stale_total = None
+    resp = requests.post(f"{BASE_URL}/crm/v3/objects/deals/search", headers=HEADERS, timeout=30, json={
+        "filterGroups": [
+            {"filters": base + [{"propertyName": "notes_last_contacted", "operator": "LT", "value": cutoff_ms}]},
+            {"filters": base + [{"propertyName": "notes_last_contacted", "operator": "NOT_HAS_PROPERTY"}]},
+        ],
+        "properties": ["dealname"],
+        "limit": 1,
+    })
+    if resp.ok:
+        stale_total = resp.json().get("total", 0)
+
+    stage_labels = {}
+    resp = requests.get(f"{BASE_URL}/crm/v3/pipelines/deals/{OLD_DEALS_PIPELINE_ID}", headers=HEADERS, timeout=30)
+    if resp.ok:
+        stage_labels = {s["id"]: s.get("label", s["id"]) for s in resp.json().get("stages", [])}
+
+    deals = {}
+    for batch in _chunks(list(deal_ids), 100):
+        resp = requests.post(f"{BASE_URL}/crm/v3/objects/deals/batch/read", headers=HEADERS, timeout=30, json={
+            "properties": ["notes_last_contacted", "dealstage", "pipeline", "dealname"],
+            "inputs": [{"id": d} for d in batch],
+        })
+        if not resp.ok:
+            continue
+        for row in resp.json().get("results", []):
+            p = row.get("properties") or {}
+            deals[row["id"]] = {
+                "notes_last_contacted": p.get("notes_last_contacted") or "",
+                "dealstage": p.get("dealstage") or "",
+                "stage_label": stage_labels.get(p.get("dealstage") or "", p.get("dealstage") or ""),
+                "is_open": (p.get("dealstage") or "") in OLD_DEALS_OPEN_STAGE_IDS,
+            }
+    return {"stale_total": stale_total, "deals": deals,
+            "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+
+def get_old_deals_live_cached(deal_ids, force=False):
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cached = _OLD_DEALS_CACHE["data"]
+    # Also refetch if a newly posted deal isn't in the cached batch-read yet.
+    if (not force and cached and (now_ts - _OLD_DEALS_CACHE["ts"] < OLD_DEALS_CACHE_TTL)
+            and set(deal_ids) <= set(cached["deals"]) | cached.get("missing", set())):
+        return cached
+    data = fetch_old_deals_live(deal_ids)
+    data["missing"] = set(deal_ids) - set(data["deals"])
+    _OLD_DEALS_CACHE["data"] = data
+    _OLD_DEALS_CACHE["ts"] = now_ts
+    return data
+
+
+@app.route("/old-deals")
+@tab_required('old_deals')
+def old_deals_page():
+    return render_template("old_deals.html")
+
+
+@app.route("/api/old-deals")
+@tab_required('old_deals')
+def old_deals_data():
+    with get_db() as conn:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM old_deal_followup ORDER BY batch_date DESC, created_at DESC, deal_name"
+        ).fetchall()]
+    live = get_old_deals_live_cached([r["deal_id"] for r in rows], force=request.args.get("refresh") == "1")
+    now = datetime.now(timezone.utc)
+
+    counts = {s: 0 for s in OLD_DEALS_STATUSES}
+    counts["contacted_auto"] = 0
+    due = 0
+    still_stale = 0  # tracked deals HubSpot still counts in the stale pool
+    stale_cutoff = now - timedelta(days=OLD_DEALS_STALE_DAYS)
+    batches = {}
+    for r in rows:
+        hs = live["deals"].get(r["deal_id"], {})
+        live_lc = hs.get("notes_last_contacted", "")
+        live_dt = _parse_hs_dt(live_lc)
+        batch_dt = _parse_hs_dt(r["batch_date"])
+        status = r["status"] or "drafted"
+        effective = status
+        # Andrew sent it (or otherwise touched the deal) without updating the
+        # tab -- HubSpot's last-contacted moved past the day it was drafted.
+        if status == "drafted" and live_dt and batch_dt and live_dt > batch_dt:
+            effective = "contacted_auto"
+        last_dt = live_dt or _parse_hs_dt(r["last_contacted_before"])
+        next_due = (last_dt + timedelta(days=OLD_DEALS_STALE_DAYS)) if last_dt else None
+        r.update({
+            "effective_status": effective,
+            "live_last_contacted": live_lc,
+            "live_stage_label": hs.get("stage_label") or r["deal_stage_label"],
+            "deal_closed": bool(hs) and not hs.get("is_open", True),
+            "next_touch_due": next_due.date().isoformat() if next_due else "",
+            "touch_due": bool(effective in ("sent", "contacted_auto") and next_due and next_due <= now),
+            "hubspot_url": f"https://app.hubspot.com/contacts/23416553/record/0-3/{r['deal_id']}",
+        })
+        counts[effective] = counts.get(effective, 0) + 1
+        # A deal missing from HubSpot (deleted/merged) can't count as re-contacted.
+        still_stale += bool(not hs or (hs.get("is_open") and (not live_dt or live_dt < stale_cutoff)))
+        due += r["touch_due"]
+        b = batches.setdefault(r["batch_label"] or "(no batch)", {"label": r["batch_label"] or "(no batch)",
+                                                                  "date": r["batch_date"], "count": 0})
+        b["count"] += 1
+
+    return jsonify({
+        "stale_total": live["stale_total"],
+        "tracked": len(rows),
+        "drafted": counts["drafted"],
+        "sent": counts["sent"] + counts["contacted_auto"],
+        "contacted_auto": counts["contacted_auto"],
+        "replied": counts["replied"],
+        "meeting_booked": counts["meeting_booked"],
+        "not_interested": counts["not_interested"],
+        "skip": counts["skip"],
+        "touch_due": due,
+        "tracked_still_stale": still_stale,
+        "statuses": OLD_DEALS_STATUSES,
+        "batches": sorted(batches.values(), key=lambda b: b["date"] or "", reverse=True),
+        "fetched_at": live["fetched_at"],
+        "rows": rows,
+    })
+
+
+@app.route("/api/old-deals/batch", methods=["POST"])
+def old_deals_batch():
+    if not old_deals_write_allowed():
+        return jsonify({"error": "unauthorized"}), 403
+    body = request.get_json(force=True) or {}
+    deals = body.get("deals") or []
+    if not isinstance(deals, list) or not deals:
+        return jsonify({"error": "deals (non-empty list) required"}), 400
+    now = datetime.now(timezone.utc).isoformat()
+    default_label = str(body.get("batch_label") or "")
+    default_date = str(body.get("batch_date") or datetime.now(PACIFIC_TZ).date().isoformat())
+
+    inserted, updated, status_kept, skipped = 0, 0, 0, []
+    with get_db() as conn:
+        for d in deals:
+            deal_id = str((d or {}).get("deal_id") or "").strip()
+            if not deal_id:
+                skipped.append({"deal": d, "reason": "deal_id required"})
+                continue
+            values = {f: str(d[f] if d[f] is not None else "") for f in OLD_DEALS_FIELDS if f in d}
+            values.setdefault("batch_label", default_label)
+            values.setdefault("batch_date", default_date)
+            status = d.get("status")
+            if status is not None and status not in OLD_DEALS_STATUSES:
+                skipped.append({"deal_id": deal_id, "reason": f"bad status {status!r}"})
+                continue
+            existing = conn.execute("SELECT status FROM old_deal_followup WHERE deal_id = ?", [deal_id]).fetchone()
+            if not existing:
+                values.update({"deal_id": deal_id, "status": status or "drafted",
+                               "status_updated_at": now, "created_at": now})
+                cols = list(values)
+                conn.execute(f"INSERT INTO old_deal_followup ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                             [values[c] for c in cols])
+                inserted += 1
+                continue
+            # Never clobber a status Andrew already moved past "drafted", nor
+            # his own notes with an empty value from a re-run.
+            if status and status != existing["status"]:
+                if (existing["status"] or "drafted") == "drafted":
+                    values.update({"status": status, "status_updated_at": now})
+                else:
+                    status_kept += 1
+            if not values.get("notes"):
+                values.pop("notes", None)
+            if values:
+                conn.execute(f"UPDATE old_deal_followup SET {', '.join(f'{c} = ?' for c in values)} WHERE deal_id = ?",
+                             list(values.values()) + [deal_id])
+            updated += 1
+    _OLD_DEALS_CACHE["data"] = None
+    return jsonify({"ok": True, "inserted": inserted, "updated": updated,
+                    "status_kept": status_kept, "skipped": skipped})
+
+
+@app.route("/api/old-deals/<deal_id>", methods=["PATCH"])
+@tab_required('old_deals')
+def old_deals_update(deal_id):
+    body = request.get_json(force=True) or {}
+    fields, values = [], []
+    if "status" in body:
+        if body["status"] not in OLD_DEALS_STATUSES:
+            return jsonify({"error": f"status must be one of {OLD_DEALS_STATUSES}"}), 400
+        fields += ["status = ?", "status_updated_at = ?"]
+        values += [body["status"], datetime.now(timezone.utc).isoformat()]
+    if "notes" in body:
+        fields.append("notes = ?")
+        values.append(str(body["notes"] or ""))
+    if not fields:
+        return jsonify({"error": "nothing to update"}), 400
+    with get_db() as conn:
+        cur = conn.execute(f"UPDATE old_deal_followup SET {', '.join(fields)} WHERE deal_id = ?", values + [deal_id])
+        if not cur.rowcount:
+            return jsonify({"error": "not found"}), 404
+        row = dict(conn.execute("SELECT * FROM old_deal_followup WHERE deal_id = ?", [deal_id]).fetchone())
+    return jsonify({"ok": True, "row": row})
 
 
 @app.route("/api/pull-contacts/searches")

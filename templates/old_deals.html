@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Old Deal Followup — Deal Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: #0f1117; color: #e8e9f0; min-height: 100vh; }
+
+    header {
+      background: #0d0e1a; color: #e8e9f0;
+      padding: 16px 32px; display: flex; align-items: center; gap: 14px;
+      border-bottom: 1px solid #2a2d3e; box-shadow: 0 2px 12px rgba(0,0,0,.4);
+    }
+    header h1 { font-size: 1.15rem; font-weight: 700; }
+    header p { font-size: .82rem; color: #8b8fa8; margin-top: 2px; }
+    header > svg, header > div:first-of-type { flex-shrink: 0; }
+    .header-nav { margin-left: auto; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    .nav-link {
+      padding: 7px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600;
+      text-decoration: none; color: #c9cad8; background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1); transition: background .15s; white-space: nowrap;
+    }
+    .nav-link:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
+    .nav-link.active { background: #ff5c35; color: #fff; border-color: #ff5c35; }
+
+    .main { padding: 28px 36px 60px; }
+
+    .summary-strip { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+    .summary-chip {
+      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 10px;
+      padding: 12px 18px; font-size: .8rem; color: #8b8fa8; min-width: 130px; cursor: pointer;
+    }
+    .summary-chip.active { border-color: #ff5c35; }
+    .summary-chip .num { display: block; font-size: 1.4rem; font-weight: 700; color: #e8e9f0; margin-bottom: 2px; }
+    .summary-chip.good .num { color: #22c55e; }
+    .summary-chip.bad .num { color: #f87171; }
+    .summary-chip.warn .num { color: #fbbf24; }
+
+    .panel {
+      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 12px;
+      padding: 18px 20px; margin-bottom: 18px;
+    }
+
+    .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .toolbar input[type="text"], .toolbar select {
+      border: 1px solid #2a2d3e; border-radius: 6px; padding: 8px 12px;
+      font-size: .86rem; font-family: inherit; color: #e8e9f0; background: #14151f; outline: none;
+    }
+    .toolbar input[type="text"] { flex: 1; min-width: 220px; }
+    .toolbar input:focus, .toolbar select:focus { border-color: #ff5c35; }
+    .btn { padding: 8px 16px; border-radius: 6px; font-size: .85rem; font-weight: 600; cursor: pointer; border: none; transition: background .15s; text-decoration: none; display: inline-block; }
+    .btn-primary { background: #ff5c35; color: #fff; }
+    .btn-primary:hover { background: #e04d2a; }
+    .btn-ghost { background: rgba(255,255,255,.06); color: #c9cad8; border: 1px solid #2a2d3e; }
+    .btn-ghost:hover { background: rgba(255,255,255,.12); color: #e8e9f0; }
+    .btn-sm { padding: 5px 12px; font-size: .78rem; }
+
+    .sub { display: block; font-size: .72rem; color: #5c607a; }
+    .pill { display: inline-block; font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; letter-spacing: .2px; white-space: nowrap; }
+    .pill-good { background: rgba(34,197,94,.15); color: #4ade80; }
+    .pill-warn { background: rgba(251,191,36,.15); color: #fbbf24; }
+    .pill-bad  { background: rgba(248,113,113,.15); color: #f87171; }
+    .pill-info { background: rgba(96,165,250,.15); color: #60a5fa; }
+    .pill-pending { background: rgba(139,143,168,.15); color: #8b8fa8; }
+    .hs-link { color: #60a5fa; text-decoration: none; }
+    .hs-link:hover { text-decoration: underline; }
+    .empty-hint { color: #5c607a; font-size: .85rem; padding: 30px 0; text-align: center; }
+
+    .progress-track { height: 8px; border-radius: 4px; background: #14151f; overflow: hidden; margin-top: 8px; }
+    .progress-fill { height: 100%; background: #ff5c35; border-radius: 4px; }
+
+    .deal-card {
+      background: #1e2030; border: 1px solid #2a2d3e; border-radius: 12px;
+      padding: 16px 18px; margin-bottom: 12px;
+    }
+    .deal-card.due { border-color: rgba(251,191,36,.5); }
+    .deal-top { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+    .deal-main { flex: 1; min-width: 240px; }
+    .deal-name { font-size: .95rem; font-weight: 700; color: #e8e9f0; text-decoration: none; }
+    .deal-name:hover { text-decoration: underline; }
+    .deal-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .contact-line { font-size: .84rem; color: #c9cad8; margin-top: 8px; word-break: break-word; }
+    .contact-line a { color: #60a5fa; text-decoration: none; }
+    .dates { display: grid; grid-template-columns: repeat(3, auto); gap: 4px 18px; font-size: .78rem; color: #8b8fa8; margin-top: 8px; }
+    .dates b { color: #c9cad8; font-weight: 600; }
+    .context { font-size: .82rem; color: #a3a6bd; margin-top: 10px; line-height: 1.45; white-space: pre-wrap; }
+    .flag-box { margin-top: 10px; font-size: .8rem; color: #f87171; background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.25); border-radius: 8px; padding: 7px 10px; }
+    .deal-side { display: flex; flex-direction: column; gap: 8px; width: 230px; }
+    .deal-side select, .deal-side textarea, .draft-body {
+      width: 100%; border: 1px solid #2a2d3e; border-radius: 6px; padding: 7px 10px;
+      font-size: .82rem; font-family: inherit; color: #e8e9f0; background: #14151f; outline: none;
+    }
+    .deal-side textarea { min-height: 60px; resize: vertical; }
+    .deal-side select:focus, .deal-side textarea:focus { border-color: #ff5c35; }
+    .save-hint { font-size: .7rem; color: #5c607a; min-height: 1em; }
+
+    details.draft { margin-top: 12px; border-top: 1px solid #22243a; padding-top: 10px; }
+    details.draft summary { cursor: pointer; font-size: .82rem; font-weight: 600; color: #c9cad8; list-style: none; }
+    details.draft summary::-webkit-details-marker { display: none; }
+    details.draft summary::before { content: '▸ '; color: #ff5c35; }
+    details.draft[open] summary::before { content: '▾ '; }
+    .draft-subject { font-size: .84rem; color: #e8e9f0; margin: 10px 0 8px; word-break: break-word; }
+    .draft-body { white-space: pre-wrap; line-height: 1.5; min-height: 0; max-height: 360px; overflow-y: auto; color: #c9cad8; }
+    .draft-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+    @media (max-width: 760px) {
+      header { padding: 14px 16px; flex-wrap: wrap; }
+      header > div:first-of-type { flex-shrink: 1; min-width: 0; }
+      .header-nav { margin-left: 0; width: 100%; overflow-x: auto; padding-bottom: 4px; flex-wrap: nowrap; justify-content: flex-start; }
+      .main { padding: 16px 16px 40px; }
+      .summary-chip { min-width: 0; flex: 1 1 calc(50% - 7px); padding: 10px 12px; }
+      .toolbar input[type="text"] { min-width: 0; width: 100%; flex-basis: 100%; }
+      .toolbar select { flex: 1 1 calc(50% - 6px); min-width: 0; }
+      .deal-main { min-width: 0; flex-basis: 100%; }
+      .deal-side { width: 100%; }
+      .dates { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="rgba(255,255,255,.2)"/>
+    <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>Old Deal Followup</h1>
+    <p>Reconnect drafts for open Pipeline 7 deals not contacted in 30+ days</p>
+  </div>
+  <div class="header-nav">
+    {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
+    {% if current_user.is_owner or 'msp_data' in current_user.tabs %}<a href="/msp-data" class="nav-link">MSP Data</a>{% endif %}
+    {% if current_user.is_owner or 'sales_activity' in current_user.tabs %}<a href="/sales-activity" class="nav-link">RS Sales Activity</a>{% endif %}
+    {% if current_user.is_owner or 'cloud_tango' in current_user.tabs %}<a href="/cloud-tango" class="nav-link">Cloud Tango</a>{% endif %}
+    {% if current_user.is_owner or 'ai_sdrs' in current_user.tabs %}<a href="/ai-sdrs" class="nav-link">AI SDRs</a>{% endif %}
+    <a href="/old-deals" class="nav-link active">Old Deal Followup</a>
+    {% if current_user.is_owner or 'dashboard' in current_user.tabs %}<a href="/" class="nav-link">← Deal Alloc</a>{% endif %}
+    <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
+    {% if current_user.is_owner or 'hs_workflows' in current_user.tabs %}<a href="/hs-workflows" class="nav-link">HS Workflows</a>{% endif %}
+    {% if current_user.is_owner or 'admin' in current_user.tabs %}<a href="/admin" class="nav-link">Admin</a>{% endif %}
+    <a href="/logout" class="nav-link">Log Out</a>
+  </div>
+</header>
+
+<div class="main">
+  <div class="summary-strip" id="summaryStrip"></div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <input type="text" id="searchBox" placeholder="Search deal, contact, email, or company..." />
+      <select id="batchFilter"><option value="all">All batches</option></select>
+      <select id="statusFilter">
+        <option value="all">All statuses</option>
+        <option value="drafted">Drafted (awaiting send)</option>
+        <option value="sent_any">Sent (incl. auto-detected)</option>
+        <option value="contacted_auto">Contacted (auto-detected)</option>
+        <option value="replied">Replied</option>
+        <option value="meeting_booked">Meeting booked</option>
+        <option value="not_interested">Not interested</option>
+        <option value="skip">Skip</option>
+        <option value="due">Due for next touch</option>
+      </select>
+      <button class="btn btn-ghost" id="refreshBtn" type="button">↻ Refresh from HubSpot</button>
+      <span id="loadingHint" style="font-size:.8rem;color:#5c607a;"></span>
+    </div>
+    <div id="poolProgress" style="margin-top:14px;font-size:.8rem;color:#8b8fa8;"></div>
+  </div>
+
+  <div id="dealList"></div>
+</div>
+
+<script>
+const STATUS_LABELS = {
+  drafted: 'Drafted', sent: 'Sent', replied: 'Replied', meeting_booked: 'Meeting booked',
+  not_interested: 'Not interested', skip: 'Skip', contacted_auto: 'Contacted (auto-detected)',
+};
+const STATUS_PILL = {
+  drafted: 'pill-warn', sent: 'pill-info', contacted_auto: 'pill-info', replied: 'pill-good',
+  meeting_booked: 'pill-good', not_interested: 'pill-bad', skip: 'pill-pending',
+};
+let DATA = null;
+let currentBatch = 'all';
+let currentStatus = 'all';
+let currentQuery = '';
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtDay(iso) {
+  if (!iso) return '';
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso + 'T12:00:00' : iso);
+  if (isNaN(d)) return iso;
+  return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
+}
+
+function matches(r) {
+  if (currentBatch !== 'all' && (r.batch_label || '(no batch)') !== currentBatch) return false;
+  const st = r.effective_status;
+  if (currentStatus === 'sent_any' && !(st === 'sent' || st === 'contacted_auto')) return false;
+  if (currentStatus === 'due' && !r.touch_due) return false;
+  if (!['all', 'sent_any', 'due'].includes(currentStatus) && st !== currentStatus) return false;
+  if (currentQuery) {
+    const hay = `${r.deal_name} ${r.contact_name} ${r.contact_email} ${r.company}`.toLowerCase();
+    if (!hay.includes(currentQuery.toLowerCase())) return false;
+  }
+  return true;
+}
+
+function renderSummary() {
+  const d = DATA;
+  const chips = [
+    {label: 'Stale pool remaining', num: d.stale_total, cls: '', status: 'all'},
+    {label: 'Tracked', num: d.tracked, cls: '', status: 'all'},
+    {label: 'Drafted / awaiting send', num: d.drafted, cls: 'warn', status: 'drafted'},
+    {label: d.contacted_auto ? `Sent (${d.contacted_auto} auto)` : 'Sent', num: d.sent, cls: '', status: 'sent_any'},
+    {label: 'Replied', num: d.replied, cls: 'good', status: 'replied'},
+    {label: 'Meetings booked', num: d.meeting_booked, cls: 'good', status: 'meeting_booked'},
+    {label: 'Due for next touch', num: d.touch_due, cls: d.touch_due ? 'warn' : '', status: 'due'},
+  ];
+  const strip = document.getElementById('summaryStrip');
+  strip.innerHTML = chips.map((c, i) => `
+    <div class="summary-chip ${c.cls} ${currentStatus === c.status && i > 1 ? 'active' : ''}" data-status="${c.status}">
+      <span class="num">${c.num == null ? '—' : c.num.toLocaleString()}</span>${c.label}</div>`).join('');
+  strip.querySelectorAll('.summary-chip').forEach(el => el.addEventListener('click', () => {
+    currentStatus = currentStatus === el.dataset.status ? 'all' : el.dataset.status;
+    document.getElementById('statusFilter').value = currentStatus;
+    render();
+  }));
+
+  // Pool = everything stale now + tracked deals that have since dropped out
+  // of it by being contacted; the bar is how much of that has been touched.
+  const touched = d.tracked - d.tracked_still_stale;
+  document.getElementById('poolProgress').innerHTML = d.stale_total == null
+    ? 'Could not load the stale-pool count from HubSpot.'
+    : `<b style="color:#c9cad8">${d.tracked.toLocaleString()}</b> deals drafted so far, <b style="color:#c9cad8">${touched.toLocaleString()}</b> re-contacted · <b style="color:#c9cad8">${d.stale_total.toLocaleString()}</b> open Pipeline 7 deals still 30+ days since last contact
+       <span class="sub" style="display:inline">(as of ${new Date(d.fetched_at).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})})</span>
+       <div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, touched / Math.max(1, touched + d.stale_total) * 100).toFixed(1)}%"></div></div>`;
+
+  const sel = document.getElementById('batchFilter');
+  sel.innerHTML = '<option value="all">All batches</option>' + d.batches.map(b =>
+    `<option value="${esc(b.label)}">${esc(b.label)}${b.date ? ' · ' + esc(fmtDay(b.date)) : ''} (${b.count})</option>`).join('');
+  sel.value = d.batches.some(b => b.label === currentBatch) ? currentBatch : 'all';
+}
+
+function dealCard(r) {
+  const st = r.effective_status;
+  const mailto = `mailto:${encodeURIComponent(r.contact_email || '')}?subject=${encodeURIComponent(r.draft_subject || '')}&body=${encodeURIComponent(r.draft_body || '')}`;
+  const lastLive = r.live_last_contacted || r.last_contacted_before;
+  return `
+  <div class="deal-card ${r.touch_due ? 'due' : ''}" data-id="${esc(r.deal_id)}">
+    <div class="deal-top">
+      <div class="deal-main">
+        <a class="deal-name" href="${r.hubspot_url}" target="_blank" rel="noopener">${esc(r.deal_name) || esc(r.deal_id)}</a>
+        <div class="deal-meta">
+          <span class="pill ${STATUS_PILL[st] || 'pill-pending'}">${esc(STATUS_LABELS[st] || st)}</span>
+          <span class="pill ${r.deal_closed ? 'pill-bad' : 'pill-pending'}">${esc(r.live_stage_label || 'Unknown stage')}${r.deal_closed ? ' (closed)' : ''}</span>
+          ${r.flag ? '<span class="pill pill-bad">⚠ Caution</span>' : ''}
+          ${r.touch_due ? '<span class="pill pill-warn">Next touch due</span>' : ''}
+          <span class="pill pill-pending">${esc(r.batch_label || '(no batch)')}</span>
+        </div>
+        <div class="contact-line">
+          <b style="color:#e8e9f0">${esc(r.contact_name) || '(no contact)'}</b>${r.contact_title ? ' · ' + esc(r.contact_title) : ''}${r.company ? ' · ' + esc(r.company) : ''}
+          ${r.contact_email ? `<br><a href="mailto:${esc(r.contact_email)}">${esc(r.contact_email)}</a>` : ''}
+        </div>
+        <div class="dates">
+          <span>Last contacted at draft: <b>${r.last_contacted_before ? fmtDay(r.last_contacted_before) : 'Never'}</b></span>
+          <span>Last contacted now: <b>${lastLive ? fmtDay(lastLive) : 'Never'}</b></span>
+          <span>Next touch due: <b>${r.next_touch_due ? fmtDay(r.next_touch_due) : '—'}</b></span>
+        </div>
+        ${r.flag ? `<div class="flag-box">⚠ ${esc(r.flag)}</div>` : ''}
+        ${r.context_summary ? `<div class="context">${esc(r.context_summary)}</div>` : ''}
+      </div>
+      <div class="deal-side">
+        <select class="status-select">
+          ${DATA.statuses.map(s => `<option value="${s}" ${s === r.status ? 'selected' : ''}>${esc(STATUS_LABELS[s])}</option>`).join('')}
+        </select>
+        ${st === 'contacted_auto' ? '<span class="sub">HubSpot shows contact after this was drafted — mark Sent to confirm.</span>' : ''}
+        <textarea class="notes-box" placeholder="Notes...">${esc(r.notes)}</textarea>
+        <span class="save-hint"></span>
+      </div>
+    </div>
+    <details class="draft">
+      <summary>Draft email${r.draft_subject ? '' : ' (none)'}</summary>
+      <div class="draft-subject"><span class="sub" style="display:inline">Subject:</span> ${esc(r.draft_subject)}</div>
+      <div class="draft-body">${esc(r.draft_body)}</div>
+      <div class="draft-actions">
+        <button class="btn btn-ghost btn-sm copy-btn" type="button" data-what="body">Copy body</button>
+        <button class="btn btn-ghost btn-sm copy-btn" type="button" data-what="subject">Copy subject</button>
+        <a class="btn btn-primary btn-sm" href="${esc(mailto)}">Open in email</a>
+      </div>
+    </details>
+  </div>`;
+}
+
+function render() {
+  renderSummary();
+  const rows = DATA.rows.filter(matches);
+  const list = document.getElementById('dealList');
+  if (!rows.length) {
+    list.innerHTML = `<div class="panel"><div class="empty-hint">${DATA.rows.length ? 'No deals match this filter.' : 'No old-deal batches posted yet.'}</div></div>`;
+    return;
+  }
+  list.innerHTML = rows.map(dealCard).join('');
+  list.querySelectorAll('.deal-card').forEach(card => {
+    const id = card.dataset.id;
+    const row = DATA.rows.find(r => r.deal_id === id);
+    const hint = card.querySelector('.save-hint');
+    card.querySelector('.status-select').addEventListener('change', e => save(id, {status: e.target.value}, hint));
+    card.querySelector('.notes-box').addEventListener('change', e => save(id, {notes: e.target.value}, hint));
+    card.querySelectorAll('.copy-btn').forEach(btn => btn.addEventListener('click', async () => {
+      const text = btn.dataset.what === 'subject' ? row.draft_subject : row.draft_body;
+      try {
+        await navigator.clipboard.writeText(text || '');
+      } catch (_) {
+        const ta = document.createElement('textarea');
+        ta.value = text || ''; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+      }
+      const orig = btn.textContent; btn.textContent = 'Copied ✓';
+      setTimeout(() => { btn.textContent = orig; }, 1400);
+    }));
+  });
+}
+
+async function save(id, body, hint) {
+  hint.textContent = 'Saving…';
+  const resp = await fetch(`/api/old-deals/${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  if (!resp.ok) { hint.textContent = 'Save failed'; return; }
+  hint.textContent = 'Saved ✓';
+  if ('status' in body) await load();
+}
+
+async function load(refresh) {
+  document.getElementById('loadingHint').textContent = refresh ? 'Refreshing from HubSpot…' : 'Loading…';
+  const resp = await fetch(`/api/old-deals${refresh ? '?refresh=1' : ''}`);
+  document.getElementById('loadingHint').textContent = '';
+  if (!resp.ok) { document.getElementById('loadingHint').textContent = 'Failed to load.'; return; }
+  DATA = await resp.json();
+  render();
+}
+
+document.getElementById('batchFilter').addEventListener('change', e => { currentBatch = e.target.value; render(); });
+document.getElementById('statusFilter').addEventListener('change', e => { currentStatus = e.target.value; render(); });
+let searchDebounce = null;
+document.getElementById('searchBox').addEventListener('input', e => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => { currentQuery = e.target.value.trim(); render(); }, 250);
+});
+document.getElementById('refreshBtn').addEventListener('click', () => load(true));
+
+load();
+</script>
+
+</body>
+</html>
