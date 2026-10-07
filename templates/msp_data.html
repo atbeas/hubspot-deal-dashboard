@@ -136,6 +136,7 @@
     {% if current_user.is_owner or 'cloud_tango' in current_user.tabs %}<a href="/cloud-tango" class="nav-link">Cloud Tango</a>{% endif %}
     {% if current_user.is_owner or 'ai_sdrs' in current_user.tabs %}<a href="/ai-sdrs" class="nav-link">AI SDRs</a>{% endif %}
     {% if current_user.is_owner or 'old_deals' in current_user.tabs %}<a href="/old-deals" class="nav-link">Old Deal Followup</a>{% endif %}
+    {% if current_user.is_owner or 'new_deals' in current_user.tabs %}<a href="/new-deals" class="nav-link">New Deal Followup</a>{% endif %}
     {% if current_user.is_owner or 'dashboard' in current_user.tabs %}<a href="/" class="nav-link">← Deal Alloc</a>{% endif %}
     <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
     {% if current_user.is_owner or 'hs_workflows' in current_user.tabs %}<a href="/hs-workflows" class="nav-link">HS Workflows</a>{% endif %}

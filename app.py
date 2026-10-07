@@ -30,6 +30,7 @@ TAB_DEFS = [
     ("cloud_tango",   "Cloud Tango"),
     ("ai_sdrs",       "AI SDRs"),
     ("old_deals",     "Old Deal Followup"),
+    ("new_deals",     "New Deal Followup"),
     ("admin",         "Admin"),
 ]
 TAB_KEYS = [key for key, _ in TAB_DEFS]
@@ -345,6 +346,32 @@ def init_db():
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS new_deal_followup (
+                row_id TEXT PRIMARY KEY,
+                deal_id TEXT NOT NULL,
+                batch_label TEXT DEFAULT '',
+                batch_date TEXT DEFAULT '',
+                deal_name TEXT DEFAULT '',
+                deal_stage_label TEXT DEFAULT '',
+                contact_id TEXT DEFAULT '',
+                contact_name TEXT DEFAULT '',
+                contact_email TEXT DEFAULT '',
+                contact_title TEXT DEFAULT '',
+                company TEXT DEFAULT '',
+                last_contacted_before TEXT DEFAULT '',
+                context_summary TEXT DEFAULT '',
+                flag TEXT DEFAULT '',
+                draft_subject TEXT DEFAULT '',
+                draft_body TEXT DEFAULT '',
+                deal_created TEXT DEFAULT '',
+                next_activity_date TEXT DEFAULT '',
+                status TEXT DEFAULT 'drafted',
+                status_updated_at TEXT,
+                notes TEXT DEFAULT '',
+                created_at TEXT
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS app_users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -523,7 +550,7 @@ def first_accessible_url(user):
             return url_for({"dashboard": "index", "hs_workflows": "hs_workflows_page",
                             "pull_contacts": "pull_contacts_page", "msp_data": "msp_data_page",
                             "sales_activity": "sales_activity_page", "cloud_tango": "cloud_tango_page",
-                            "ai_sdrs": "ai_sdrs_page", "old_deals": "old_deals_page",
+                            "ai_sdrs": "ai_sdrs_page", "old_deals": "old_deals_page", "new_deals": "new_deals_page",
                             "admin": "admin"}[key])
     return url_for("no_access")
 
@@ -3862,11 +3889,17 @@ def ai_sdrs_contacts():
 
 
 # ---------------------------------------------------------------------------
-# Old Deal Followup -- Andrew's recurring "RS Old Deal Followup" motion. Each
-# run an agent takes the 10 open Pipeline 7 deals with the oldest
-# notes_last_contacted (>30 days, or never), drafts a warm reconnect email for
-# each, and POSTs them to /api/old-deals/batch. Andrew sends them himself;
-# this tab tracks progress through the whole stale pool and each deal's state.
+# Deal Followup -- two of Andrew's recurring motions share this code:
+#   old: "RS Old Deal Followup". Each run an agent takes the 10 open Pipeline 7
+#        deals with the oldest notes_last_contacted (>30 days, or never) and
+#        drafts a warm reconnect email. One row per deal (old_deal_followup).
+#   new: "RS New Deal Followup". Each run takes every open Pipeline 7 deal
+#        created in the last 60 days with no contact in 7+ days (future tasks
+#        and meetings don't exempt a deal) and drafts a momentum email. A deal
+#        can come back in a later week, so rows are one per deal per batch
+#        (new_deal_followup, keyed by row_id = "<deal_id>_<batch_date>").
+# The agent POSTs drafts to /api/<old|new>-deals/batch. Andrew sends them
+# himself; each tab tracks progress through its pool and each deal's state.
 # notes_last_updated is deliberately NOT used: the 2026-07-29 bulk follow-up
 # task sweep bumped it on every Pipeline 7 deal.
 # ---------------------------------------------------------------------------
@@ -3875,23 +3908,37 @@ OLD_DEALS_OPEN_STAGE_IDS = [
     "255728551", "146957437", "146957438", "146957439", "146957441",
     "146957442", "147976264", "163550904", "163550905", "163550976",
 ]
-OLD_DEALS_STALE_DAYS = 30
 OLD_DEALS_STATUSES = ["drafted", "sent", "replied", "meeting_booked", "not_interested", "skip"]
 OLD_DEALS_FIELDS = [
     "batch_label", "batch_date", "deal_name", "deal_stage_label", "contact_id", "contact_name",
     "contact_email", "contact_title", "company", "last_contacted_before", "context_summary",
     "flag", "draft_subject", "draft_body", "notes",
 ]
-_OLD_DEALS_CACHE = {"data": None, "ts": 0}
+NEW_DEALS_EXTRA_FIELDS = ["deal_created", "next_activity_date"]
+DEAL_FOLLOWUP_MOTIONS = {
+    "old": {"table": "old_deal_followup", "key": "deal_id", "tab": "old_deals",
+            "stale_days": 30, "created_days": None, "fields": OLD_DEALS_FIELDS,
+            "title": "Old Deal Followup", "path": "/old-deals",
+            "subtitle": "Reconnect drafts for open Pipeline 7 deals not contacted in 30+ days",
+            "pool_label": "open Pipeline 7 deals still 30+ days since last contact",
+            "pool_chip": "Stale pool remaining"},
+    "new": {"table": "new_deal_followup", "key": "row_id", "tab": "new_deals",
+            "stale_days": 7, "created_days": 60, "fields": OLD_DEALS_FIELDS + NEW_DEALS_EXTRA_FIELDS,
+            "title": "New Deal Followup", "path": "/new-deals",
+            "subtitle": "Momentum drafts for open Pipeline 7 deals created in the last 60 days and not contacted in 7+ days",
+            "pool_label": "new (60-day) open Pipeline 7 deals untouched 7+ days",
+            "pool_chip": "Untouched new deals now"},
+}
+_DEAL_FOLLOWUP_CACHE = {m: {"data": None, "ts": 0} for m in DEAL_FOLLOWUP_MOTIONS}
 OLD_DEALS_CACHE_TTL = 600  # seconds
 
 
-def old_deals_write_allowed():
+def deal_followup_write_allowed(motion):
     sent = request.headers.get("X-API-Secret", "")
     if OLD_DEALS_API_SECRET and sent and secrets.compare_digest(sent, OLD_DEALS_API_SECRET):
         return True
     user = get_current_user()
-    return bool(user and user_has_tab(user, "old_deals"))
+    return bool(user and user_has_tab(user, DEAL_FOLLOWUP_MOTIONS[motion]["tab"]))
 
 
 def _parse_hs_dt(value):
@@ -3906,13 +3953,18 @@ def _parse_hs_dt(value):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def fetch_old_deals_live(deal_ids):
-    """Stale-pool size + current notes_last_contacted/dealstage for each tracked deal."""
-    cutoff_ms = str(int((datetime.now(timezone.utc) - timedelta(days=OLD_DEALS_STALE_DAYS)).timestamp() * 1000))
+def fetch_deal_followup_live(motion, deal_ids):
+    """Pool size + current notes_last_contacted/dealstage for each tracked deal."""
+    cfg = DEAL_FOLLOWUP_MOTIONS[motion]
+    now = datetime.now(timezone.utc)
+    cutoff_ms = str(int((now - timedelta(days=cfg["stale_days"])).timestamp() * 1000))
     base = [
         {"propertyName": "pipeline", "operator": "EQ", "value": OLD_DEALS_PIPELINE_ID},
         {"propertyName": "dealstage", "operator": "IN", "values": OLD_DEALS_OPEN_STAGE_IDS},
     ]
+    if cfg["created_days"]:
+        base.append({"propertyName": "createdate", "operator": "GTE",
+                     "value": str(int((now - timedelta(days=cfg["created_days"])).timestamp() * 1000))})
     stale_total = None
     resp = requests.post(f"{BASE_URL}/crm/v3/objects/deals/search", headers=HEADERS, timeout=30, json={
         "filterGroups": [
@@ -3933,7 +3985,7 @@ def fetch_old_deals_live(deal_ids):
     deals = {}
     for batch in _chunks(list(deal_ids), 100):
         resp = requests.post(f"{BASE_URL}/crm/v3/objects/deals/batch/read", headers=HEADERS, timeout=30, json={
-            "properties": ["notes_last_contacted", "dealstage", "pipeline", "dealname"],
+            "properties": ["notes_last_contacted", "notes_next_activity_date", "dealstage", "pipeline", "dealname"],
             "inputs": [{"id": d} for d in batch],
         })
         if not resp.ok:
@@ -3942,6 +3994,7 @@ def fetch_old_deals_live(deal_ids):
             p = row.get("properties") or {}
             deals[row["id"]] = {
                 "notes_last_contacted": p.get("notes_last_contacted") or "",
+                "notes_next_activity_date": p.get("notes_next_activity_date") or "",
                 "dealstage": p.get("dealstage") or "",
                 "stage_label": stage_labels.get(p.get("dealstage") or "", p.get("dealstage") or ""),
                 "is_open": (p.get("dealstage") or "") in OLD_DEALS_OPEN_STAGE_IDS,
@@ -3950,41 +4003,43 @@ def fetch_old_deals_live(deal_ids):
             "fetched_at": datetime.now(timezone.utc).isoformat()}
 
 
-def get_old_deals_live_cached(deal_ids, force=False):
+def get_deal_followup_live_cached(motion, deal_ids, force=False):
     now_ts = datetime.now(timezone.utc).timestamp()
-    cached = _OLD_DEALS_CACHE["data"]
+    cache = _DEAL_FOLLOWUP_CACHE[motion]
+    cached = cache["data"]
     # Also refetch if a newly posted deal isn't in the cached batch-read yet.
-    if (not force and cached and (now_ts - _OLD_DEALS_CACHE["ts"] < OLD_DEALS_CACHE_TTL)
+    if (not force and cached and (now_ts - cache["ts"] < OLD_DEALS_CACHE_TTL)
             and set(deal_ids) <= set(cached["deals"]) | cached.get("missing", set())):
         return cached
-    data = fetch_old_deals_live(deal_ids)
+    data = fetch_deal_followup_live(motion, deal_ids)
     data["missing"] = set(deal_ids) - set(data["deals"])
-    _OLD_DEALS_CACHE["data"] = data
-    _OLD_DEALS_CACHE["ts"] = now_ts
+    cache["data"] = data
+    cache["ts"] = now_ts
     return data
 
 
-@app.route("/old-deals")
-@tab_required('old_deals')
-def old_deals_page():
-    return render_template("old_deals.html")
+def _deal_followup_page(motion):
+    cfg = DEAL_FOLLOWUP_MOTIONS[motion]
+    return render_template("old_deals.html", motion=motion, api_base=f"/api/{motion}-deals", **{
+        k: cfg[k] for k in ("title", "subtitle", "pool_label", "pool_chip", "stale_days", "path")})
 
 
-@app.route("/api/old-deals")
-@tab_required('old_deals')
-def old_deals_data():
+def _deal_followup_data(motion):
+    cfg = DEAL_FOLLOWUP_MOTIONS[motion]
     with get_db() as conn:
         rows = [dict(r) for r in conn.execute(
-            "SELECT * FROM old_deal_followup ORDER BY batch_date DESC, created_at DESC, deal_name"
+            f"SELECT * FROM {cfg['table']} ORDER BY batch_date DESC, created_at DESC, deal_name"
         ).fetchall()]
-    live = get_old_deals_live_cached([r["deal_id"] for r in rows], force=request.args.get("refresh") == "1")
+    live = get_deal_followup_live_cached(motion, list({r["deal_id"] for r in rows}),
+                                         force=request.args.get("refresh") == "1")
     now = datetime.now(timezone.utc)
+    stale_days = cfg["stale_days"]
 
     counts = {s: 0 for s in OLD_DEALS_STATUSES}
     counts["contacted_auto"] = 0
     due = 0
-    still_stale = 0  # tracked deals HubSpot still counts in the stale pool
-    stale_cutoff = now - timedelta(days=OLD_DEALS_STALE_DAYS)
+    still_stale = set()  # tracked deals HubSpot still counts in the pool
+    stale_cutoff = now - timedelta(days=stale_days)
     batches = {}
     for r in rows:
         hs = live["deals"].get(r["deal_id"], {})
@@ -3998,10 +4053,12 @@ def old_deals_data():
         if status == "drafted" and live_dt and batch_dt and live_dt > batch_dt:
             effective = "contacted_auto"
         last_dt = live_dt or _parse_hs_dt(r["last_contacted_before"])
-        next_due = (last_dt + timedelta(days=OLD_DEALS_STALE_DAYS)) if last_dt else None
+        next_due = (last_dt + timedelta(days=stale_days)) if last_dt else None
         r.update({
+            "row_key": r[cfg["key"]],
             "effective_status": effective,
             "live_last_contacted": live_lc,
+            "live_next_activity": hs.get("notes_next_activity_date", ""),
             "live_stage_label": hs.get("stage_label") or r["deal_stage_label"],
             "deal_closed": bool(hs) and not hs.get("is_open", True),
             "next_touch_due": next_due.date().isoformat() if next_due else "",
@@ -4010,15 +4067,18 @@ def old_deals_data():
         })
         counts[effective] = counts.get(effective, 0) + 1
         # A deal missing from HubSpot (deleted/merged) can't count as re-contacted.
-        still_stale += bool(not hs or (hs.get("is_open") and (not live_dt or live_dt < stale_cutoff)))
+        if not hs or (hs.get("is_open") and (not live_dt or live_dt < stale_cutoff)):
+            still_stale.add(r["deal_id"])
         due += r["touch_due"]
         b = batches.setdefault(r["batch_label"] or "(no batch)", {"label": r["batch_label"] or "(no batch)",
                                                                   "date": r["batch_date"], "count": 0})
         b["count"] += 1
 
+    tracked_deals = {r["deal_id"] for r in rows}
     return jsonify({
         "stale_total": live["stale_total"],
         "tracked": len(rows),
+        "tracked_deals": len(tracked_deals),
         "drafted": counts["drafted"],
         "sent": counts["sent"] + counts["contacted_auto"],
         "contacted_auto": counts["contacted_auto"],
@@ -4027,7 +4087,7 @@ def old_deals_data():
         "not_interested": counts["not_interested"],
         "skip": counts["skip"],
         "touch_due": due,
-        "tracked_still_stale": still_stale,
+        "tracked_still_stale": len(still_stale),
         "statuses": OLD_DEALS_STATUSES,
         "batches": sorted(batches.values(), key=lambda b: b["date"] or "", reverse=True),
         "fetched_at": live["fetched_at"],
@@ -4035,9 +4095,9 @@ def old_deals_data():
     })
 
 
-@app.route("/api/old-deals/batch", methods=["POST"])
-def old_deals_batch():
-    if not old_deals_write_allowed():
+def _deal_followup_batch(motion):
+    cfg = DEAL_FOLLOWUP_MOTIONS[motion]
+    if not deal_followup_write_allowed(motion):
         return jsonify({"error": "unauthorized"}), 403
     body = request.get_json(force=True) or {}
     deals = body.get("deals") or []
@@ -4046,6 +4106,7 @@ def old_deals_batch():
     now = datetime.now(timezone.utc).isoformat()
     default_label = str(body.get("batch_label") or "")
     default_date = str(body.get("batch_date") or datetime.now(PACIFIC_TZ).date().isoformat())
+    table, key = cfg["table"], cfg["key"]
 
     inserted, updated, status_kept, skipped = 0, 0, 0, []
     with get_db() as conn:
@@ -4054,19 +4115,30 @@ def old_deals_batch():
             if not deal_id:
                 skipped.append({"deal": d, "reason": "deal_id required"})
                 continue
-            values = {f: str(d[f] if d[f] is not None else "") for f in OLD_DEALS_FIELDS if f in d}
-            values.setdefault("batch_label", default_label)
-            values.setdefault("batch_date", default_date)
+            values = {f: str(d[f] if d[f] is not None else "") for f in cfg["fields"] if f in d}
             status = d.get("status")
             if status is not None and status not in OLD_DEALS_STATUSES:
                 skipped.append({"deal_id": deal_id, "reason": f"bad status {status!r}"})
                 continue
-            existing = conn.execute("SELECT status FROM old_deal_followup WHERE deal_id = ?", [deal_id]).fetchone()
+            if key == "row_id":
+                # Status-only updates may name the row directly, or fall back
+                # to this deal's most recent row.
+                row_id = str(d.get("row_id") or "")
+                if not row_id and "batch_date" not in d and "batch_date" not in body:
+                    latest = conn.execute(f"SELECT row_id FROM {table} WHERE deal_id = ? ORDER BY batch_date DESC LIMIT 1",
+                                          [deal_id]).fetchone()
+                    row_id = latest["row_id"] if latest else ""
+                key_val = row_id or f"{deal_id}_{values.get('batch_date') or default_date}"
+            else:
+                key_val = deal_id
+            existing = conn.execute(f"SELECT status FROM {table} WHERE {key} = ?", [key_val]).fetchone()
             if not existing:
-                values.update({"deal_id": deal_id, "status": status or "drafted",
+                values.setdefault("batch_label", default_label)
+                values.setdefault("batch_date", default_date)
+                values.update({key: key_val, "deal_id": deal_id, "status": status or "drafted",
                                "status_updated_at": now, "created_at": now})
                 cols = list(values)
-                conn.execute(f"INSERT INTO old_deal_followup ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                conn.execute(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                              [values[c] for c in cols])
                 inserted += 1
                 continue
@@ -4077,20 +4149,25 @@ def old_deals_batch():
                     values.update({"status": status, "status_updated_at": now})
                 else:
                     status_kept += 1
+            # Top-level batch_label/batch_date apply to rows that don't carry
+            # their own, but a bare {deal_id, status} update keeps the row's.
+            if body.get("batch_label"):
+                values.setdefault("batch_label", default_label)
+            if body.get("batch_date"):
+                values.setdefault("batch_date", default_date)
             if not values.get("notes"):
                 values.pop("notes", None)
             if values:
-                conn.execute(f"UPDATE old_deal_followup SET {', '.join(f'{c} = ?' for c in values)} WHERE deal_id = ?",
-                             list(values.values()) + [deal_id])
+                conn.execute(f"UPDATE {table} SET {', '.join(f'{c} = ?' for c in values)} WHERE {key} = ?",
+                             list(values.values()) + [key_val])
             updated += 1
-    _OLD_DEALS_CACHE["data"] = None
+    _DEAL_FOLLOWUP_CACHE[motion]["data"] = None
     return jsonify({"ok": True, "inserted": inserted, "updated": updated,
                     "status_kept": status_kept, "skipped": skipped})
 
 
-@app.route("/api/old-deals/<deal_id>", methods=["PATCH"])
-@tab_required('old_deals')
-def old_deals_update(deal_id):
+def _deal_followup_update(motion, row_key):
+    cfg = DEAL_FOLLOWUP_MOTIONS[motion]
     body = request.get_json(force=True) or {}
     fields, values = [], []
     if "status" in body:
@@ -4103,12 +4180,59 @@ def old_deals_update(deal_id):
         values.append(str(body["notes"] or ""))
     if not fields:
         return jsonify({"error": "nothing to update"}), 400
+    table, key = cfg["table"], cfg["key"]
     with get_db() as conn:
-        cur = conn.execute(f"UPDATE old_deal_followup SET {', '.join(fields)} WHERE deal_id = ?", values + [deal_id])
+        cur = conn.execute(f"UPDATE {table} SET {', '.join(fields)} WHERE {key} = ?", values + [row_key])
         if not cur.rowcount:
             return jsonify({"error": "not found"}), 404
-        row = dict(conn.execute("SELECT * FROM old_deal_followup WHERE deal_id = ?", [deal_id]).fetchone())
+        row = dict(conn.execute(f"SELECT * FROM {table} WHERE {key} = ?", [row_key]).fetchone())
     return jsonify({"ok": True, "row": row})
+
+
+@app.route("/old-deals")
+@tab_required('old_deals')
+def old_deals_page():
+    return _deal_followup_page("old")
+
+
+@app.route("/api/old-deals")
+@tab_required('old_deals')
+def old_deals_data():
+    return _deal_followup_data("old")
+
+
+@app.route("/api/old-deals/batch", methods=["POST"])
+def old_deals_batch():
+    return _deal_followup_batch("old")
+
+
+@app.route("/api/old-deals/<deal_id>", methods=["PATCH"])
+@tab_required('old_deals')
+def old_deals_update(deal_id):
+    return _deal_followup_update("old", deal_id)
+
+
+@app.route("/new-deals")
+@tab_required('new_deals')
+def new_deals_page():
+    return _deal_followup_page("new")
+
+
+@app.route("/api/new-deals")
+@tab_required('new_deals')
+def new_deals_data():
+    return _deal_followup_data("new")
+
+
+@app.route("/api/new-deals/batch", methods=["POST"])
+def new_deals_batch():
+    return _deal_followup_batch("new")
+
+
+@app.route("/api/new-deals/<row_id>", methods=["PATCH"])
+@tab_required('new_deals')
+def new_deals_update(row_id):
+    return _deal_followup_update("new", row_id)
 
 
 @app.route("/api/pull-contacts/searches")

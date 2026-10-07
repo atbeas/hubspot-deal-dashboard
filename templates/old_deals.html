@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Old Deal Followup — Deal Dashboard</title>
+  <title>{{ title }} — Deal Dashboard</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -128,8 +128,8 @@
     <path d="M8 22l5-8 5 5 5-10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>
   <div>
-    <h1>Old Deal Followup</h1>
-    <p>Reconnect drafts for open Pipeline 7 deals not contacted in 30+ days</p>
+    <h1>{{ title }}</h1>
+    <p>{{ subtitle }}</p>
   </div>
   <div class="header-nav">
     {% if current_user.is_owner or 'pull_contacts' in current_user.tabs %}<a href="/pull-contacts" class="nav-link">Pull Contacts</a>{% endif %}
@@ -137,7 +137,8 @@
     {% if current_user.is_owner or 'sales_activity' in current_user.tabs %}<a href="/sales-activity" class="nav-link">RS Sales Activity</a>{% endif %}
     {% if current_user.is_owner or 'cloud_tango' in current_user.tabs %}<a href="/cloud-tango" class="nav-link">Cloud Tango</a>{% endif %}
     {% if current_user.is_owner or 'ai_sdrs' in current_user.tabs %}<a href="/ai-sdrs" class="nav-link">AI SDRs</a>{% endif %}
-    <a href="/old-deals" class="nav-link active">Old Deal Followup</a>
+    {% if current_user.is_owner or 'old_deals' in current_user.tabs %}<a href="/old-deals" class="nav-link{% if motion == 'old' %} active{% endif %}">Old Deal Followup</a>{% endif %}
+    {% if current_user.is_owner or 'new_deals' in current_user.tabs %}<a href="/new-deals" class="nav-link{% if motion == 'new' %} active{% endif %}">New Deal Followup</a>{% endif %}
     {% if current_user.is_owner or 'dashboard' in current_user.tabs %}<a href="/" class="nav-link">← Deal Alloc</a>{% endif %}
     <a href="https://dealsuccess.runwayselling.app/meetings" class="nav-link" target="_blank" rel="noopener">KPIs</a>
     {% if current_user.is_owner or 'hs_workflows' in current_user.tabs %}<a href="/hs-workflows" class="nav-link">HS Workflows</a>{% endif %}
@@ -174,6 +175,10 @@
 </div>
 
 <script>
+const MOTION = {{ motion|tojson }};
+const API_BASE = {{ api_base|tojson }};
+const POOL_LABEL = {{ pool_label|tojson }};
+const POOL_CHIP = {{ pool_chip|tojson }};
 const STATUS_LABELS = {
   drafted: 'Drafted', sent: 'Sent', replied: 'Replied', meeting_booked: 'Meeting booked',
   not_interested: 'Not interested', skip: 'Skip', contacted_auto: 'Contacted (auto-detected)',
@@ -213,7 +218,7 @@ function matches(r) {
 function renderSummary() {
   const d = DATA;
   const chips = [
-    {label: 'Stale pool remaining', num: d.stale_total, cls: '', status: 'all'},
+    {label: POOL_CHIP, num: d.stale_total, cls: '', status: 'all'},
     {label: 'Tracked', num: d.tracked, cls: '', status: 'all'},
     {label: 'Drafted / awaiting send', num: d.drafted, cls: 'warn', status: 'drafted'},
     {label: d.contacted_auto ? `Sent (${d.contacted_auto} auto)` : 'Sent', num: d.sent, cls: '', status: 'sent_any'},
@@ -233,10 +238,10 @@ function renderSummary() {
 
   // Pool = everything stale now + tracked deals that have since dropped out
   // of it by being contacted; the bar is how much of that has been touched.
-  const touched = d.tracked - d.tracked_still_stale;
+  const touched = d.tracked_deals - d.tracked_still_stale;
   document.getElementById('poolProgress').innerHTML = d.stale_total == null
     ? 'Could not load the stale-pool count from HubSpot.'
-    : `<b style="color:#c9cad8">${d.tracked.toLocaleString()}</b> deals drafted so far, <b style="color:#c9cad8">${touched.toLocaleString()}</b> re-contacted · <b style="color:#c9cad8">${d.stale_total.toLocaleString()}</b> open Pipeline 7 deals still 30+ days since last contact
+    : `<b style="color:#c9cad8">${d.tracked.toLocaleString()}</b> drafts so far, <b style="color:#c9cad8">${touched.toLocaleString()}</b> re-contacted · <b style="color:#c9cad8">${d.stale_total.toLocaleString()}</b> ${esc(POOL_LABEL)}
        <span class="sub" style="display:inline">(as of ${new Date(d.fetched_at).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})})</span>
        <div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, touched / Math.max(1, touched + d.stale_total) * 100).toFixed(1)}%"></div></div>`;
 
@@ -251,7 +256,7 @@ function dealCard(r) {
   const mailto = `mailto:${encodeURIComponent(r.contact_email || '')}?subject=${encodeURIComponent(r.draft_subject || '')}&body=${encodeURIComponent(r.draft_body || '')}`;
   const lastLive = r.live_last_contacted || r.last_contacted_before;
   return `
-  <div class="deal-card ${r.touch_due ? 'due' : ''}" data-id="${esc(r.deal_id)}">
+  <div class="deal-card ${r.touch_due ? 'due' : ''}" data-id="${esc(r.row_key)}">
     <div class="deal-top">
       <div class="deal-main">
         <a class="deal-name" href="${r.hubspot_url}" target="_blank" rel="noopener">${esc(r.deal_name) || esc(r.deal_id)}</a>
@@ -270,6 +275,8 @@ function dealCard(r) {
           <span>Last contacted at draft: <b>${r.last_contacted_before ? fmtDay(r.last_contacted_before) : 'Never'}</b></span>
           <span>Last contacted now: <b>${lastLive ? fmtDay(lastLive) : 'Never'}</b></span>
           <span>Next touch due: <b>${r.next_touch_due ? fmtDay(r.next_touch_due) : '—'}</b></span>
+          ${MOTION === 'new' ? `<span>Deal created: <b>${r.deal_created ? fmtDay(r.deal_created) : '—'}</b></span>
+          <span>Next scheduled activity: <b>${(r.live_next_activity || r.next_activity_date) ? fmtDay(r.live_next_activity || r.next_activity_date) : 'None'}</b></span>` : ''}
         </div>
         ${r.flag ? `<div class="flag-box">⚠ ${esc(r.flag)}</div>` : ''}
         ${r.context_summary ? `<div class="context">${esc(r.context_summary)}</div>` : ''}
@@ -301,13 +308,13 @@ function render() {
   const rows = DATA.rows.filter(matches);
   const list = document.getElementById('dealList');
   if (!rows.length) {
-    list.innerHTML = `<div class="panel"><div class="empty-hint">${DATA.rows.length ? 'No deals match this filter.' : 'No old-deal batches posted yet.'}</div></div>`;
+    list.innerHTML = `<div class="panel"><div class="empty-hint">${DATA.rows.length ? 'No deals match this filter.' : 'No batches posted yet.'}</div></div>`;
     return;
   }
   list.innerHTML = rows.map(dealCard).join('');
   list.querySelectorAll('.deal-card').forEach(card => {
     const id = card.dataset.id;
-    const row = DATA.rows.find(r => r.deal_id === id);
+    const row = DATA.rows.find(r => r.row_key === id);
     const hint = card.querySelector('.save-hint');
     card.querySelector('.status-select').addEventListener('change', e => save(id, {status: e.target.value}, hint));
     card.querySelector('.notes-box').addEventListener('change', e => save(id, {notes: e.target.value}, hint));
@@ -327,7 +334,7 @@ function render() {
 
 async function save(id, body, hint) {
   hint.textContent = 'Saving…';
-  const resp = await fetch(`/api/old-deals/${encodeURIComponent(id)}`, {
+  const resp = await fetch(`${API_BASE}/${encodeURIComponent(id)}`, {
     method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
   });
   if (!resp.ok) { hint.textContent = 'Save failed'; return; }
@@ -337,7 +344,7 @@ async function save(id, body, hint) {
 
 async function load(refresh) {
   document.getElementById('loadingHint').textContent = refresh ? 'Refreshing from HubSpot…' : 'Loading…';
-  const resp = await fetch(`/api/old-deals${refresh ? '?refresh=1' : ''}`);
+  const resp = await fetch(`${API_BASE}${refresh ? '?refresh=1' : ''}`);
   document.getElementById('loadingHint').textContent = '';
   if (!resp.ok) { document.getElementById('loadingHint').textContent = 'Failed to load.'; return; }
   DATA = await resp.json();
