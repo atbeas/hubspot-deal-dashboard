@@ -725,6 +725,7 @@ def no_access():
 QUICK_NOTES_HOST_MAP = {
     "zap.runwayselling.app": "zap",
     "biz.runwayselling.app": "biznatron",
+    "fbhk.runwayselling.app": "fbhk",
 }
 
 
@@ -1453,6 +1454,13 @@ QUICK_NOTES_COMPANIES = {
         "owner_id": "89539474",
         "sd_id": "91889388",
         "booking_link": "https://meetings.hubspot.com/10talent/b",
+    },
+    # Standalone workflow (WF8, flow 1898174331), not a WF1 branch.
+    "fbhk": {
+        "label": "FBHK",
+        "owner_id": "89539474",
+        "sd_id": "100566538",
+        "booking_link": "https://meetings.hubspot.com/10talent/10ttfbhk",
     },
 }
 
