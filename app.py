@@ -2247,6 +2247,16 @@ WF_REFERENCE = {
         "description": "Patrick Leddy's dedicated workflow. Creates a Runway Selling deal when a contact "
                         "books via his LinkedIn meeting link.",
     },
+    "1849740146": {
+        "label": "WF7",
+        "description": "Andrew Beasley's 10tT LinkedIn workflow. Creates a Runway Selling deal when a "
+                        "contact books via the andrew-beasley meeting link.",
+    },
+    "1898174331": {
+        "label": "WF8",
+        "description": "FBHK vendor workflow. Creates a 10talent Tech deal (sales dev Harris K, rs_partner = "
+                        "\"Pending Assignment\") when a contact books via the 10talent/10ttfbhk link.",
+    },
 }
 
 # Custom behavioral event IDs seen in this portal's meeting-booking triggers
