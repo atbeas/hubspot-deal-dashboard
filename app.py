@@ -3912,7 +3912,7 @@ def ai_sdrs_contacts():
 #        deals with the oldest notes_last_contacted (>30 days, or never) and
 #        drafts a warm reconnect email. One row per deal (old_deal_followup).
 #   new: "RS New Deal Followup". Each run takes every open Pipeline 7 deal
-#        created in the last 60 days with no contact in 7+ days (future tasks
+#        created in the last 90 days with no contact in 7+ days (future tasks
 #        and meetings don't exempt a deal) and drafts a momentum email. A deal
 #        can come back in a later week, so rows are one per deal per batch
 #        (new_deal_followup, keyed by row_id = "<deal_id>_<batch_date>").
@@ -3941,10 +3941,10 @@ DEAL_FOLLOWUP_MOTIONS = {
             "pool_label": "open Pipeline 7 deals still 30+ days since last contact",
             "pool_chip": "Stale pool remaining"},
     "new": {"table": "new_deal_followup", "key": "row_id", "tab": "new_deals",
-            "stale_days": 7, "created_days": 60, "fields": OLD_DEALS_FIELDS + NEW_DEALS_EXTRA_FIELDS,
+            "stale_days": 7, "created_days": 90, "fields": OLD_DEALS_FIELDS + NEW_DEALS_EXTRA_FIELDS,
             "title": "New Deal Followup", "path": "/new-deals",
-            "subtitle": "Momentum drafts for open Pipeline 7 deals created in the last 60 days and not contacted in 7+ days",
-            "pool_label": "new (60-day) open Pipeline 7 deals untouched 7+ days",
+            "subtitle": "Momentum drafts for open Pipeline 7 deals created in the last 90 days and not contacted in 7+ days",
+            "pool_label": "new (90-day) open Pipeline 7 deals untouched 7+ days",
             "pool_chip": "Untouched new deals now"},
 }
 _DEAL_FOLLOWUP_CACHE = {m: {"data": None, "ts": 0} for m in DEAL_FOLLOWUP_MOTIONS}
