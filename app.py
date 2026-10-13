@@ -414,6 +414,7 @@ CONNECTED_CALENDARS = [
     {"email": SCHEDULING_EMAIL, "label": "10talent Tech"},
     {"email": "info@runwayselling.com", "label": "Runway Selling"},
     {"email": "andrew@runwayselling.com", "label": "Andrew Beasley"},
+    {"email": "emily@runwayselling.io", "label": "Emily Davis"},
 ]
 PREP_EMAIL_FROM  = "info@runwayselling.com"
 SEND_CONFIRM_BCC = "info@runwayselling.com"
