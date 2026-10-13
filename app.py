@@ -4824,8 +4824,9 @@ def push_pull_batch(batch_id):
 # ── Microsoft Bookings → HubSpot deal sync ────────────────────────────────
 # Emily's "Bookings with me" page has no webhook/API (Microsoft's Bookings
 # API + Power Automate trigger only cover shared Bookings businesses), but
-# every booking lands on her Outlook calendar as an event titled with the
-# meeting type's name. A Railway Cron Job hits the route below every 5 min;
+# every booking lands on her Outlook calendar as "<booker> - <meeting type>"
+# tagged with the meeting type's Outlook category. Manually-sent demo
+# invites titled exactly "Tech Market IQ" are picked up too. A Railway Cron Job hits the route below every 5 min;
 # it creates the contact/company/deal/meeting in HubSpot the same way the
 # meeting-link workflows (WF1/WF8) do. None of those workflows trigger off
 # API-created contacts or meetings, so this can't double up with them.
@@ -4837,7 +4838,8 @@ def push_pull_batch(batch_id):
 BOOKINGS_SYNC_SOURCES = [
     {
         "calendar": "emily@runwayselling.io",
-        "subject": "Tech Market IQ",
+        "category": "TechSignal IQ",     # set on the Bookings meeting type
+        "subject": "Tech Market IQ",     # manual invites
         "deal_suffix": "Runway Selling (TMIQ)",
         "owner_id": "101062029",         # Emily Davis (owner id == user id)
         "pipeline": "77097563",          # 7 Runway Selling New Client Pipeline
@@ -4852,7 +4854,8 @@ INTERNAL_EMAIL_DOMAINS = {
 }
 FREE_EMAIL_DOMAINS = {
     "gmail.com", "googlemail.com", "yahoo.com", "hotmail.com", "outlook.com", "live.com",
-    "msn.com", "icloud.com", "me.com", "aol.com", "proton.me", "protonmail.com", "gmx.com",
+    "msn.com", "icloud.com", "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "gmx.com",
+    "ymail.com", "rocketmail.com", "comcast.net", "att.net", "sbcglobal.net", "verizon.net",
 }
 
 
@@ -4911,7 +4914,8 @@ def _fetch_booking_events(src, since_iso):
     token = get_ms_token()
     url = f"https://graph.microsoft.com/v1.0/users/{src['calendar']}/events"
     params = {
-        "$filter": f"subject eq '{src['subject']}' and createdDateTime ge {since_iso}",
+        "$filter": (f"(categories/any(c:c eq '{src['category']}') or subject eq '{src['subject']}') "
+                    f"and createdDateTime ge {since_iso}"),
         "$select": "id,iCalUId,subject,createdDateTime,start,end,attendees,isCancelled,onlineMeeting",
         "$orderby": "createdDateTime",
         "$top": "100",
@@ -4982,7 +4986,7 @@ def _sync_booking_event(src, event, dry_run, seen_dealnames):
         "meeting_1_date": meeting_day_ms,
         "next_meeting_date": meeting_day_ms,
         "closedate": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
-        "description": (f"Booked via Microsoft Bookings ({src['subject']}) on {src['calendar']}\n"
+        "description": (f"Booked via Microsoft Bookings ({event.get('subject')}) on {src['calendar']}\n"
                         f"Name: {fullname}\nEmail: {email}\nMeeting: {result['start']}"),
     }, deal_assoc)
 
@@ -4991,7 +4995,7 @@ def _sync_booking_event(src, event, dry_run, seen_dealnames):
         "hs_timestamp": start.isoformat(),
         "hs_meeting_start_time": start.isoformat(),
         "hs_meeting_end_time": end.isoformat(),
-        "hs_meeting_title": src["subject"],
+        "hs_meeting_title": event.get("subject") or src["subject"],
         "hs_meeting_outcome": "SCHEDULED",
         "hubspot_owner_id": src["owner_id"],
         "hs_meeting_external_url": (event.get("onlineMeeting") or {}).get("joinUrl") or "",
