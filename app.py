@@ -4935,7 +4935,6 @@ def _sync_booking_event(src, event, dry_run, seen_dealnames):
     """Returns a result dict; creates HubSpot records unless dry_run."""
     email, name = _booking_attendee(event)
     start = datetime.fromisoformat(event["start"]["dateTime"][:19]).replace(tzinfo=timezone.utc)
-    end = datetime.fromisoformat(event["end"]["dateTime"][:19]).replace(tzinfo=timezone.utc)
     result = {"event_id": event["iCalUId"], "email": email,
               "start": start.astimezone(PACIFIC_TZ).strftime("%b %d, %Y %-I:%M %p PT")}
     if event.get("isCancelled"):
@@ -4990,17 +4989,9 @@ def _sync_booking_event(src, event, dry_run, seen_dealnames):
                         f"Name: {fullname}\nEmail: {email}\nMeeting: {result['start']}"),
     }, deal_assoc)
 
-    meeting_assoc = [(contact_id, 200), (deal_id, 212)] + ([(company_id, 188)] if company_id else [])
-    _hs_create("meetings", {
-        "hs_timestamp": start.isoformat(),
-        "hs_meeting_start_time": start.isoformat(),
-        "hs_meeting_end_time": end.isoformat(),
-        "hs_meeting_title": event.get("subject") or src["subject"],
-        "hs_meeting_outcome": "SCHEDULED",
-        "hubspot_owner_id": src["owner_id"],
-        "hs_meeting_external_url": (event.get("onlineMeeting") or {}).get("joinUrl") or "",
-        "hs_meeting_body": f"Booked via Microsoft Bookings on {src['calendar']}",
-    }, meeting_assoc)
+    # No meeting record here: Emily's Outlook is connected to HubSpot, so its
+    # calendar sync logs the booking (and tracks reschedules/cancellations)
+    # once this contact exists. Creating one too would duplicate it.
     return {**result, "status": "created", "contact_id": contact_id, "deal_id": deal_id}
 
 
