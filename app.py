@@ -145,6 +145,16 @@ def init_db():
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS bookings_sync (
+                event_uid TEXT PRIMARY KEY,
+                calendar TEXT NOT NULL,
+                status TEXT NOT NULL,
+                deal_id TEXT DEFAULT '',
+                contact_id TEXT DEFAULT '',
+                processed_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS deal_archive (
                 deal_id TEXT PRIMARY KEY,
                 archived_at TEXT NOT NULL
@@ -4809,6 +4819,253 @@ def push_pull_batch(batch_id):
         "sequence_enrolled": sequence_enrolled,
         "sequence_errors": sequence_errors,
     })
+
+
+# ── Microsoft Bookings → HubSpot deal sync ────────────────────────────────
+# Emily's "Bookings with me" page has no webhook/API (Microsoft's Bookings
+# API + Power Automate trigger only cover shared Bookings businesses), but
+# every booking lands on her Outlook calendar as an event titled with the
+# meeting type's name. A Railway Cron Job hits the route below every 5 min;
+# it creates the contact/company/deal/meeting in HubSpot the same way the
+# meeting-link workflows (WF1/WF8) do. None of those workflows trigger off
+# API-created contacts or meetings, so this can't double up with them.
+#
+# Deliberately does NOT write deal_meeting -- that's the Step 3 "confirmed"
+# record that unlocks the Prep/Handoff emails, and it should still require a
+# human adding the team to the invite. The logged HubSpot meeting's exact
+# start time is enough for Step 3's auto-suggest to find the event.
+BOOKINGS_SYNC_SOURCES = [
+    {
+        "calendar": "emily@runwayselling.io",
+        "subject": "Tech Market IQ",
+        "deal_suffix": "Runway Selling (TMIQ)",
+        "owner_id": "101062029",         # Emily Davis (owner id == user id)
+        "pipeline": "77097563",          # 7 Runway Selling New Client Pipeline
+        "dealstage": "146957437",        # Sales Discovery Meeting Scheduled
+        "rs_partner": "Runway Selling",  # Sales-Client Focus
+        "sales_development": "Emily Davis",
+    },
+]
+INTERNAL_EMAIL_DOMAINS = {
+    "runwayselling.com", "runwayselling.io", "runwayselling.net", "runwayselling.app",
+    "10talent.tech", "10talent.io", "10talenttech.com", "10talenttech.net",
+}
+FREE_EMAIL_DOMAINS = {
+    "gmail.com", "googlemail.com", "yahoo.com", "hotmail.com", "outlook.com", "live.com",
+    "msn.com", "icloud.com", "me.com", "aol.com", "proton.me", "protonmail.com", "gmx.com",
+}
+
+
+def _booking_attendee(event):
+    """First non-internal attendee on the event (the person who booked)."""
+    for a in event.get("attendees", []):
+        addr = (a.get("emailAddress", {}).get("address") or "").strip().lower()
+        if addr and "@" in addr and addr.split("@", 1)[1] not in INTERNAL_EMAIL_DOMAINS:
+            return addr, (a.get("emailAddress", {}).get("name") or "").strip()
+    return None, None
+
+
+def _split_name(name, email):
+    if not name or "@" in name:
+        name = re.sub(r"[._-]+", " ", email.split("@", 1)[0]).title()
+    parts = name.split(None, 1)
+    return parts[0], (parts[1] if len(parts) > 1 else "")
+
+
+def _hs_search_one(obj, prop, value, properties):
+    resp = requests.post(
+        f"{BASE_URL}/crm/v3/objects/{obj}/search", headers=HEADERS, timeout=20,
+        json={"filterGroups": [{"filters": [{"propertyName": prop, "operator": "EQ", "value": value}]}],
+              "properties": properties, "limit": 1},
+    )
+    resp.raise_for_status()
+    results = resp.json().get("results", [])
+    return results[0] if results else None
+
+
+def _hs_create(obj, properties, associations=None):
+    payload = {"properties": properties}
+    if associations:
+        payload["associations"] = [
+            {"to": {"id": to_id}, "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": type_id}]}
+            for to_id, type_id in associations
+        ]
+    resp = requests.post(f"{BASE_URL}/crm/v3/objects/{obj}", headers=HEADERS, json=payload, timeout=20)
+    resp.raise_for_status()
+    return resp.json()["id"]
+
+
+def _resolve_booking_company(email, fullname):
+    """(company name, company id or None). Free-mail bookers get their own
+    name as the company and no company record, like a sole proprietor."""
+    domain = email.split("@", 1)[1]
+    if domain in FREE_EMAIL_DOMAINS:
+        return fullname or email, None
+    company = _hs_search_one("companies", "domain", domain, ["name", "domain"])
+    if company:
+        return (company["properties"].get("name") or domain), company["id"]
+    return domain.split(".")[0].replace("-", " ").title(), None
+
+
+def _fetch_booking_events(src, since_iso):
+    token = get_ms_token()
+    url = f"https://graph.microsoft.com/v1.0/users/{src['calendar']}/events"
+    params = {
+        "$filter": f"subject eq '{src['subject']}' and createdDateTime ge {since_iso}",
+        "$select": "id,iCalUId,subject,createdDateTime,start,end,attendees,isCancelled,onlineMeeting",
+        "$orderby": "createdDateTime",
+        "$top": "100",
+    }
+    headers = {"Authorization": f"Bearer {token}", "Prefer": 'outlook.timezone="UTC"'}
+    events = []
+    while url:
+        resp = requests.get(url, headers=headers, params=params, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        events.extend(data.get("value", []))
+        url, params = data.get("@odata.nextLink"), None
+    return events
+
+
+def _sync_booking_event(src, event, dry_run, seen_dealnames):
+    """Returns a result dict; creates HubSpot records unless dry_run."""
+    email, name = _booking_attendee(event)
+    start = datetime.fromisoformat(event["start"]["dateTime"][:19]).replace(tzinfo=timezone.utc)
+    end = datetime.fromisoformat(event["end"]["dateTime"][:19]).replace(tzinfo=timezone.utc)
+    result = {"event_id": event["iCalUId"], "email": email,
+              "start": start.astimezone(PACIFIC_TZ).strftime("%b %d, %Y %-I:%M %p PT")}
+    if event.get("isCancelled"):
+        return {**result, "status": "skipped_cancelled"}
+    if not email:
+        return {**result, "status": "skipped_no_external_attendee"}
+
+    firstname, lastname = _split_name(name, email)
+    fullname = f"{firstname} {lastname}".strip()
+    contact = _hs_search_one("contacts", "email", email, ["num_associated_deals", "company"])
+    if contact and int(contact["properties"].get("num_associated_deals") or 0) > 0:
+        return {**result, "status": "skipped_existing_deal", "contact_id": contact["id"]}
+
+    company_name, company_id = _resolve_booking_company(email, fullname)
+    if contact and contact["properties"].get("company"):
+        company_name = contact["properties"]["company"]
+    dealname = f"{company_name} | {src['deal_suffix']}"
+    result.update(dealname=dealname, name=fullname)
+    # Same company re-booking under another address (incl. typo'd emails
+    # like lbable@ for lbabel@) gets no second deal.
+    if dealname in seen_dealnames or _hs_search_one("deals", "dealname", dealname, ["dealname"]):
+        return {**result, "status": "skipped_existing_company_deal"}
+    seen_dealnames.add(dealname)
+    if dry_run:
+        return {**result, "status": "would_create", "contact_exists": bool(contact)}
+
+    if contact:
+        contact_id = contact["id"]
+    else:
+        contact_id = _hs_create("contacts", {
+            "email": email, "firstname": firstname, "lastname": lastname, "company": company_name,
+        }, [(company_id, 279)] if company_id else None)
+
+    # HubSpot date properties want midnight UTC of the (Pacific) meeting day.
+    local_day = start.astimezone(PACIFIC_TZ).date()
+    meeting_day_ms = str(int(datetime(local_day.year, local_day.month, local_day.day,
+                                      tzinfo=timezone.utc).timestamp() * 1000))
+    deal_assoc = [(contact_id, 3)] + ([(company_id, 341)] if company_id else [])
+    deal_id = _hs_create("deals", {
+        "dealname": dealname,
+        "pipeline": src["pipeline"],
+        "dealstage": src["dealstage"],
+        "hubspot_owner_id": src["owner_id"],
+        "rs_partner": src["rs_partner"],
+        "sales_development": src["sales_development"],
+        "sales_development__new_": src["owner_id"],
+        "status": "Upcoming",
+        "meeting_1_date": meeting_day_ms,
+        "next_meeting_date": meeting_day_ms,
+        "closedate": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
+        "description": (f"Booked via Microsoft Bookings ({src['subject']}) on {src['calendar']}\n"
+                        f"Name: {fullname}\nEmail: {email}\nMeeting: {result['start']}"),
+    }, deal_assoc)
+
+    meeting_assoc = [(contact_id, 200), (deal_id, 212)] + ([(company_id, 188)] if company_id else [])
+    _hs_create("meetings", {
+        "hs_timestamp": start.isoformat(),
+        "hs_meeting_start_time": start.isoformat(),
+        "hs_meeting_end_time": end.isoformat(),
+        "hs_meeting_title": src["subject"],
+        "hs_meeting_outcome": "SCHEDULED",
+        "hubspot_owner_id": src["owner_id"],
+        "hs_meeting_external_url": (event.get("onlineMeeting") or {}).get("joinUrl") or "",
+        "hs_meeting_body": f"Booked via Microsoft Bookings on {src['calendar']}",
+    }, meeting_assoc)
+    return {**result, "status": "created", "contact_id": contact_id, "deal_id": deal_id}
+
+
+def run_bookings_sync(dry_run=False, since=None):
+    """Cutover is stored per calendar on first live run, so only bookings
+    made after go-live are picked up automatically. `since` overrides it
+    for a one-off backfill (always preview with dry_run first)."""
+    report = []
+    for src in BOOKINGS_SYNC_SOURCES:
+        key = f"bookings_sync_since::{src['calendar']}"
+        cutover = get_setting(key)
+        if not cutover and not dry_run:
+            cutover = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            set_setting(key, cutover)
+        window_start = since or cutover or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        with get_db() as conn:
+            done = {r["event_uid"] for r in conn.execute(
+                "SELECT event_uid FROM bookings_sync WHERE calendar = ?", [src["calendar"]])}
+
+        # HubSpot search lags a few seconds behind writes, so a second booking
+        # by the same person in one run wouldn't see the deal just created.
+        seen_emails, seen_dealnames = set(), set()
+        for event in _fetch_booking_events(src, window_start):
+            if event["iCalUId"] in done:
+                continue
+            email, _ = _booking_attendee(event)
+            if email and email in seen_emails and not event.get("isCancelled"):
+                res = {"event_id": event["iCalUId"], "email": email, "status": "skipped_existing_deal"}
+            else:
+                try:
+                    res = _sync_booking_event(src, event, dry_run, seen_dealnames)
+                except requests.RequestException as e:
+                    # Not recorded, so the next run retries it.
+                    res = {"event_id": event["iCalUId"], "status": "error", "error": str(e)[:300]}
+            if res["status"] in ("created", "would_create", "skipped_existing_deal") and res.get("email"):
+                seen_emails.add(res["email"])
+            res["calendar"] = src["calendar"]
+            report.append(res)
+            if not dry_run and res["status"] != "error":
+                with get_db() as conn:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO bookings_sync (event_uid, calendar, status, deal_id, contact_id, processed_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        [event["iCalUId"], src["calendar"], res["status"], res.get("deal_id", ""),
+                         res.get("contact_id", ""), datetime.now(timezone.utc).isoformat()])
+                done.add(event["iCalUId"])
+    return report
+
+
+_bookings_sync_lock = threading.Lock()
+
+
+@app.route("/api/bookings-sync", methods=["POST"])
+def bookings_sync_route():
+    """Cron entry point (X-Cron-Secret, same as the daily Apollo pull).
+    ?dry_run=1 previews; ?since=<ISO UTC> backfills from that time."""
+    if not PULL_CONTACTS_CRON_SECRET or request.headers.get("X-Cron-Secret") != PULL_CONTACTS_CRON_SECRET:
+        return jsonify({"error": "forbidden"}), 403
+    if not _bookings_sync_lock.acquire(blocking=False):
+        return jsonify({"error": "sync already running"}), 409
+    try:
+        report = run_bookings_sync(
+            dry_run=request.args.get("dry_run") == "1",
+            since=request.args.get("since") or None,
+        )
+    finally:
+        _bookings_sync_lock.release()
+    return jsonify({"results": report})
 
 
 if __name__ == "__main__":
